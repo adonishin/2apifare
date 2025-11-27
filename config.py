@@ -190,12 +190,6 @@ BASE_MODELS = [
     "gemini-2.5-pro-preview-06-05",
     "gemini-2.5-pro",
     "gemini-2.5-flash",
-    "gemini-flash-latest",
-    "gemini-2.5-flash-preview-09-2025",
-    "gemini-2.5-flash-image",
-    "gemini-2.5-flash-image-preview",
-    "gemini-3-pro-preview-11-2025",
-    "gemini-3-pro-preview",
 ]
 
 PUBLIC_API_MODELS = ["gemini-2.5-flash-image", "gemini-2.5-flash-image-preview"]
@@ -207,8 +201,6 @@ PUBLIC_API_MODELS = ["gemini-2.5-flash-image", "gemini-2.5-flash-image-preview"]
 
 # Antigravity 基础模型列表（从 Google Antigravity API 获取）
 ANTIGRAVITY_BASE_MODELS = [
-    "chat_23310",
-    "chat_20706",
     "claude-sonnet-4-5",
     "claude-sonnet-4-5-thinking",
     "gemini-2.5-flash-lite",
@@ -220,6 +212,7 @@ ANTIGRAVITY_BASE_MODELS = [
     "gemini-3-pro-image",
     "gemini-3-pro-low",
     "gpt-oss-120b-medium",
+    "rev19-uic3-1p",
 ]
 
 # 已经包含特殊后缀的 Antigravity 模型（不再添加功能后缀）
@@ -447,6 +440,18 @@ async def get_credentials_dir() -> str:
     Default: ./creds
     """
     return str(await get_config_value("credentials_dir", "./creds", "CREDENTIALS_DIR"))
+
+
+async def get_max_backup_count() -> int:
+    """
+    Get maximum backup files count setting.
+    When backup files exceed this count, oldest backups will be deleted.
+
+    Environment variable: MAX_BACKUP_COUNT
+    TOML config key: max_backup_count
+    Default: 10
+    """
+    return int(await get_config_value("max_backup_count", 10, "MAX_BACKUP_COUNT"))
 
 
 async def get_code_assist_endpoint() -> str:

@@ -99,3 +99,4 @@ node_modules/
 
 # Antigravity nodejs project (should not be uploaded)
 docs/antigravity2api-nodejs/
+.backup_repo/

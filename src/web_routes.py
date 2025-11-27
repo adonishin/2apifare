@@ -187,7 +187,9 @@ class AuthCallbackUrlRequest(BaseModel):
 
 class CredFileActionRequest(BaseModel):
     filename: str
-    action: str  # enable, disable, delete
+    action: str  # enable, disable, delete, freeze, unfreeze
+    is_owner: Optional[bool] = None  # 删除时：是否是邮箱所有者
+    delete_reason: Optional[str] = None  # 删除时：删除理由（非所有者必填）
 
 
 class CredFileBatchActionRequest(BaseModel):
@@ -212,6 +214,53 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     if not verify_auth_token(credentials.credentials):
         raise HTTPException(status_code=401, detail="无效的认证令牌")
     return credentials.credentials
+
+
+async def cleanup_old_backups(backup_dir: str, max_count: int):
+    """
+    清理旧备份文件，保留最新的 max_count 个备份
+
+    Args:
+        backup_dir: 备份目录路径
+        max_count: 最大保留备份数量
+    """
+    try:
+        if not os.path.exists(backup_dir):
+            return
+
+        # 获取所有备份文件
+        backup_files = []
+        for filename in os.listdir(backup_dir):
+            if filename.endswith('.bak'):
+                file_path = os.path.join(backup_dir, filename)
+                if os.path.isfile(file_path):
+                    backup_files.append({
+                        'path': file_path,
+                        'mtime': os.path.getmtime(file_path),
+                        'name': filename
+                    })
+
+        # 如果备份数量未超过限制，无需清理
+        if len(backup_files) <= max_count:
+            return
+
+        # 按修改时间排序（从旧到新）
+        backup_files.sort(key=lambda x: x['mtime'])
+
+        # 删除最旧的备份，直到数量符合限制
+        delete_count = len(backup_files) - max_count
+        for i in range(delete_count):
+            file_info = backup_files[i]
+            try:
+                os.remove(file_info['path'])
+                log.info(f"Deleted old backup: {file_info['name']}")
+            except Exception as e:
+                log.error(f"Failed to delete old backup {file_info['name']}: {e}")
+
+        log.info(f"Backup cleanup completed: deleted {delete_count} old backups, keeping {max_count} newest")
+
+    except Exception as e:
+        log.error(f"Failed to cleanup old backups in {backup_dir}: {e}")
 
 
 async def backup_creds_before_delete():
@@ -249,6 +298,10 @@ async def backup_creds_before_delete():
         # 复制 creds.toml 文件
         shutil.copy2(creds_toml_path, backup_path)
         log.info(f"creds.toml backup created: {backup_path}")
+
+        # 清理旧备份
+        max_backup_count = await config.get_max_backup_count()
+        await cleanup_old_backups(backup_dir, max_backup_count)
 
         return backup_path
 
@@ -295,35 +348,19 @@ def is_mobile_user_agent(user_agent: str) -> bool:
 @router.get("/v1", response_class=HTMLResponse)
 @router.get("/auth", response_class=HTMLResponse)
 async def serve_control_panel(request: Request):
-    """提供统一控制面板（包含认证、文件管理、配置等功能）"""
+    """提供统一控制面板（响应式设计，自动适配移动端和桌面端）"""
     try:
-        # 获取用户代理并判断是否为移动设备
-        user_agent = request.headers.get("user-agent", "")
-        is_mobile = is_mobile_user_agent(user_agent)
-
-        # 根据设备类型选择相应的HTML文件
-        if is_mobile:
-            html_file_path = "front/control_panel_mobile.html"
-            log.info(f"Serving mobile control panel to user-agent: {user_agent}")
-        else:
-            html_file_path = "front/control_panel.html"
-            log.info(f"Serving desktop control panel to user-agent: {user_agent}")
+        # 使用响应式设计的统一HTML文件，自动适配所有设备
+        html_file_path = "front/control_panel.html"
 
         with open(html_file_path, "r", encoding="utf-8") as f:
             html_content = f.read()
+
+        log.info(f"Serving responsive control panel to user-agent: {request.headers.get('user-agent', 'unknown')}")
         return HTMLResponse(content=html_content)
     except FileNotFoundError:
         log.error(f"控制面板页面文件不存在: {html_file_path}")
-        # 如果移动端文件不存在，回退到桌面版
-        if is_mobile:
-            try:
-                with open("front/control_panel.html", "r", encoding="utf-8") as f:
-                    html_content = f.read()
-                return HTMLResponse(content=html_content)
-            except FileNotFoundError:
-                raise HTTPException(status_code=404, detail="控制面板页面不存在")
-        else:
-            raise HTTPException(status_code=404, detail="控制面板页面不存在")
+        raise HTTPException(status_code=404, detail="控制面板页面不存在")
     except Exception as e:
         log.error(f"加载控制面板页面失败: {e}")
         raise HTTPException(status_code=500, detail="服务器内部错误")
@@ -894,7 +931,45 @@ async def creds_action(request: CredFileActionRequest, token: str = Depends(veri
             log.info(f"Web request: DISABLED file {filename} successfully")
             return JSONResponse(content={"message": f"已禁用凭证文件 {os.path.basename(filename)}"})
 
+        elif action == "freeze":
+            # 冻结凭证（删除前的24小时冻结期）
+            is_owner = request.is_owner
+            delete_reason = request.delete_reason
+            
+            # 验证：如果不是所有者，必须提供删除理由且至少10个字
+            if not is_owner:
+                if not delete_reason or len(delete_reason.strip()) < 10:
+                    raise HTTPException(status_code=400, detail="删除理由不能少于10个字")
+            
+            # 设置冻结状态
+            freeze_time = int(time.time())
+            freeze_data = {
+                "frozen": True,
+                "freeze_time": freeze_time,
+                "is_owner": is_owner,
+                "delete_reason": delete_reason.strip() if delete_reason else "账号所有者申请删除",
+                "auto_delete_time": freeze_time + 86400  # 24小时后
+            }
+            
+            await credential_manager.set_cred_freeze_status(filename, freeze_data)
+            log.info(f"Credential {filename} frozen for 24 hours")
+            
+            return JSONResponse(content={
+                "message": f"凭证文件 {os.path.basename(filename)} 已进入24小时冻结期",
+                "freeze_data": freeze_data
+            })
+        
+        elif action == "unfreeze":
+            # 解冻凭证
+            await credential_manager.set_cred_freeze_status(filename, None)
+            log.info(f"Credential {filename} unfrozen")
+            
+            return JSONResponse(content={
+                "message": f"凭证文件 {os.path.basename(filename)} 已解冻"
+            })
+
         elif action == "delete":
+            # 这个操作只在24小时后由系统自动调用
             try:
                 # 在删除前备份 creds.toml 文件
                 backup_path = await backup_creds_before_delete()
@@ -904,6 +979,8 @@ async def creds_action(request: CredFileActionRequest, token: str = Depends(veri
                 # 使用存储适配器删除凭证
                 success = await storage_adapter.delete_credential(filename)
                 if success:
+                    # 清除冻结状态
+                    await credential_manager.set_cred_freeze_status(filename, None)
                     log.info(f"Successfully deleted credential: {filename}")
                     message = f"已删除凭证文件 {os.path.basename(filename)}"
                     if backup_path:
@@ -951,7 +1028,7 @@ async def creds_batch_action(
                 raise HTTPException(status_code=403, detail="管理员密码错误")
 
             # 在批量删除前备份配置文件
-            backup_path = await backup_config_before_delete()
+            backup_path = await backup_creds_before_delete()
             backup_info = os.path.basename(backup_path) if backup_path else None
             if backup_path:
                 log.info(f"Config backed up before batch delete: {backup_path}")
@@ -1093,6 +1170,11 @@ async def refresh_all_user_emails(token: str = Depends(verify_token)):
 
         # 获取存储适配器
         storage_adapter = await get_storage_adapter()
+
+        # 清理幽灵记录（只有状态字段，没有凭证内容的记录）
+        if hasattr(storage_adapter, '_cleanup_ghost_records'):
+            await storage_adapter._cleanup_ghost_records()
+            log.info("Ghost records cleanup triggered by refresh-all-emails")
 
         # 获取所有凭证文件
         credential_filenames = await storage_adapter.list_credentials()
@@ -2211,3 +2293,77 @@ async def submit_guestbook(request: GuestbookSubmitRequest, token: str = Depends
     except Exception as e:
         log.error(f"提交留言失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# 冻结凭证自动删除后台任务
+# ============================================================================
+
+async def start_freeze_checker():
+    """启动冻结凭证检查任务，每小时检查一次"""
+    log.info("冻结凭证检查任务已启动")
+    
+    while True:
+        try:
+            await asyncio.sleep(3600)  # 每小时检查一次
+            await check_and_delete_frozen_credentials()
+        except asyncio.CancelledError:
+            log.info("冻结凭证检查任务已停止")
+            break
+        except Exception as e:
+            log.error(f"冻结凭证检查任务出错: {e}")
+
+
+async def check_and_delete_frozen_credentials():
+    """检查并删除超过24小时的冻结凭证"""
+    try:
+        await ensure_credential_manager_initialized()
+        
+        # 获取所有凭证状态
+        all_states = await credential_manager.get_creds_status()
+        current_time = int(time.time())
+
+        for filename, state in all_states.items():
+            # 从扁平化字段重构 freeze_status（兼容旧的嵌套格式）
+            if "freeze_frozen" in state:
+                # 新的扁平化格式
+                freeze_status = {
+                    "frozen": state.get("freeze_frozen"),
+                    "freeze_time": state.get("freeze_time"),
+                    "is_owner": state.get("freeze_is_owner"),
+                    "delete_reason": state.get("freeze_delete_reason"),
+                    "auto_delete_time": state.get("freeze_auto_delete_time"),
+                } if state.get("freeze_frozen") else None
+            else:
+                # 兼容旧的嵌套格式
+                freeze_status = state.get("freeze_status")
+
+            if freeze_status and freeze_status.get("frozen"):
+                auto_delete_time = freeze_status.get("auto_delete_time", 0)
+                
+                # 如果超过24小时，自动删除
+                if current_time >= auto_delete_time:
+                    log.info(f"自动删除冻结超过24小时的凭证: {filename}")
+                    
+                    try:
+                        # 备份并删除
+                        backup_path = await backup_creds_before_delete()
+                        if backup_path:
+                            log.info(f"creds.toml backed up to: {backup_path}")
+                        
+                        # 获取存储适配器
+                        storage_adapter = await get_storage_adapter()
+                        success = await storage_adapter.delete_credential(filename)
+                        
+                        if success:
+                            # 清除冻结状态
+                            await credential_manager.set_cred_freeze_status(filename, None)
+                            log.info(f"Successfully auto-deleted frozen credential: {filename}")
+                        else:
+                            log.error(f"Failed to auto-delete frozen credential: {filename}")
+                    
+                    except Exception as e:
+                        log.error(f"Error auto-deleting frozen credential {filename}: {e}")
+    
+    except Exception as e:
+        log.error(f"Error checking frozen credentials: {e}")

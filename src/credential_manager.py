@@ -403,6 +403,40 @@ class CredentialManager:
             log.error(f"Error setting credential disabled state {credential_name}: {e}")
             return False
 
+    async def set_cred_freeze_status(self, credential_name: str, freeze_data: Optional[Dict[str, Any]]):
+        """设置凭证的冻结状态（扁平化存储，避免 TOML 嵌套表）"""
+        try:
+            if freeze_data is None:
+                # 解冻：移除所有冻结相关字段
+                state_updates = {
+                    "freeze_frozen": None,
+                    "freeze_time": None,
+                    "freeze_is_owner": None,
+                    "freeze_delete_reason": None,
+                    "freeze_auto_delete_time": None,
+                }
+            else:
+                # 冻结：扁平化存储冻结信息（避免嵌套字典）
+                state_updates = {
+                    "freeze_frozen": freeze_data.get("frozen", True),
+                    "freeze_time": freeze_data.get("freeze_time"),
+                    "freeze_is_owner": freeze_data.get("is_owner", False),
+                    "freeze_delete_reason": freeze_data.get("delete_reason", ""),
+                    "freeze_auto_delete_time": freeze_data.get("auto_delete_time"),
+                }
+
+            success = await self.update_credential_state(credential_name, state_updates)
+
+            if success:
+                action = "frozen" if freeze_data else "unfrozen"
+                log.info(f"Credential {action}: {credential_name}")
+
+            return success
+
+        except Exception as e:
+            log.error(f"Error setting credential freeze status {credential_name}: {e}")
+            return False
+
     async def get_creds_status(self) -> Dict[str, Dict[str, Any]]:
         """获取所有凭证的状态"""
         try:

@@ -20,6 +20,7 @@ from src.credential_manager import CredentialManager
 from src.task_manager import shutdown_all_tasks
 from config import get_server_host, get_server_port
 from log import log
+from backup_scheduler import start_backup_scheduler, stop_backup_scheduler
 
 # 全局凭证管理器
 global_credential_manager = None
@@ -58,6 +59,21 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log.error(f"创建自动加载环境变量凭证任务失败: {e}")
 
+    # 启动定时检查冻结凭证的后台任务
+    try:
+        from src.web_routes import start_freeze_checker
+        asyncio.create_task(start_freeze_checker())
+        log.info("冻结凭证检查任务已启动")
+    except Exception as e:
+        log.error(f"启动冻结凭证检查任务失败: {e}")
+
+    # 启动凭证备份调度器（每小时自动备份到 GitHub）
+    try:
+        start_backup_scheduler(interval_hours=1)
+        log.info("凭证备份调度器已启动（每小时自动备份）")
+    except Exception as e:
+        log.error(f"启动凭证备份调度器失败: {e}")
+
     # OAuth回调服务器将在需要时按需启动
 
     yield
@@ -79,6 +95,13 @@ async def lifespan(app: FastAPI):
             log.info("凭证管理器已关闭")
         except Exception as e:
             log.error(f"关闭凭证管理器时出错: {e}")
+
+    # 停止备份调度器
+    try:
+        stop_backup_scheduler()
+        log.info("凭证备份调度器已停止")
+    except Exception as e:
+        log.error(f"停止凭证备份调度器时出错: {e}")
 
     log.info("GCLI2API 主服务已停止")
 

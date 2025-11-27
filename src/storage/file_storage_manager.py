@@ -14,6 +14,7 @@ import toml
 
 from log import log
 from .cache_manager import UnifiedCacheManager, CacheBackend
+import config
 
 
 class FileCacheBackend(CacheBackend):
@@ -46,8 +47,26 @@ class FileCacheBackend(CacheBackend):
             # 确保目录存在
             os.makedirs(os.path.dirname(self._file_path), exist_ok=True)
 
+            # 过滤掉嵌套的 freeze_status 字段（避免在 creds.toml 中生成子表）
+            # freeze_status 应该是一个简单值（None）或不存在，而不是嵌套字典
+            filtered_data = {}
+            for key, value in data.items():
+                if isinstance(value, dict):
+                    # 对于每个凭证的数据，过滤掉嵌套的 freeze_status
+                    filtered_value = {}
+                    for field_key, field_value in value.items():
+                        if field_key == "freeze_status" and isinstance(field_value, dict):
+                            # 如果 freeze_status 是字典，不写入（避免生成子表）
+                            # 只允许 None 或简单值
+                            log.warning(f"Filtering nested freeze_status for {key}, use separate state management")
+                            continue
+                        filtered_value[field_key] = field_value
+                    filtered_data[key] = filtered_value
+                else:
+                    filtered_data[key] = value
+
             # 写入TOML文件
-            toml_content = toml.dumps(data)
+            toml_content = toml.dumps(filtered_data)
             async with aiofiles.open(self._file_path, "w", encoding="utf-8") as f:
                 await f.write(toml_content)
 
@@ -72,6 +91,12 @@ class FileStorageManager:
         "next_reset_time",
         "daily_limit_gemini_2_5_pro",
         "daily_limit_total",
+        # 冻结状态（扁平化存储，避免 TOML 嵌套表）
+        "freeze_frozen",
+        "freeze_time",
+        "freeze_is_owner",
+        "freeze_delete_reason",
+        "freeze_auto_delete_time",
     }
 
     # 默认状态数据模板（不包含动态值）
@@ -143,8 +168,34 @@ class FileStorageManager:
         await self._credentials_cache_manager.start()
         await self._config_cache_manager.start()
 
+        # 清理幽灵记录（只有状态字段，没有凭证内容的记录）
+        await self._cleanup_ghost_records()
+
         self._initialized = True
         log.debug("File storage manager initialized with unified cache")
+
+    async def _cleanup_ghost_records(self) -> None:
+        """清理幽灵记录：只有状态字段，没有 refresh_token 的记录"""
+        try:
+            all_data = await self._credentials_cache_manager.get_all()
+
+            ghost_records = []
+            for filename, content in all_data.items():
+                # 如果没有 refresh_token，说明这是纯状态记录（幽灵记录）
+                if 'refresh_token' not in content:
+                    ghost_records.append(filename)
+
+            if ghost_records:
+                log.info(f"Found {len(ghost_records)} ghost records, cleaning up...")
+                for filename in ghost_records:
+                    await self._credentials_cache_manager.delete(filename)
+                    log.debug(f"Removed ghost record: {filename}")
+                log.info(f"Ghost records cleanup completed: removed {len(ghost_records)} records")
+            else:
+                log.debug("No ghost records found")
+
+        except Exception as e:
+            log.error(f"Error cleaning up ghost records: {e}")
 
     async def close(self) -> None:
         """关闭文件存储"""
@@ -499,6 +550,48 @@ class FileStorageManager:
         # 复用状态更新方法
         return await self._update_antigravity_account_state(filename, stats_updates)
 
+    async def _cleanup_old_antigravity_backups(self, backup_dir: str):
+        """清理 Antigravity 旧备份文件，保留最新的 N 个"""
+        try:
+            max_backup_count = await config.get_max_backup_count()
+
+            if not os.path.exists(backup_dir):
+                return
+
+            # 获取所有备份文件
+            backup_files = []
+            for filename in os.listdir(backup_dir):
+                if filename.endswith('.bak'):
+                    file_path = os.path.join(backup_dir, filename)
+                    if os.path.isfile(file_path):
+                        backup_files.append({
+                            'path': file_path,
+                            'mtime': os.path.getmtime(file_path),
+                            'name': filename
+                        })
+
+            # 如果备份数量未超过限制，无需清理
+            if len(backup_files) <= max_backup_count:
+                return
+
+            # 按修改时间排序（从旧到新）
+            backup_files.sort(key=lambda x: x['mtime'])
+
+            # 删除最旧的备份，直到数量符合限制
+            delete_count = len(backup_files) - max_backup_count
+            for i in range(delete_count):
+                file_info = backup_files[i]
+                try:
+                    os.remove(file_info['path'])
+                    log.info(f"Deleted old Antigravity backup: {file_info['name']}")
+                except Exception as e:
+                    log.error(f"Failed to delete old Antigravity backup {file_info['name']}: {e}")
+
+            log.info(f"Antigravity backup cleanup: deleted {delete_count} old backups, keeping {max_backup_count} newest")
+
+        except Exception as e:
+            log.error(f"Failed to cleanup Antigravity backups in {backup_dir}: {e}")
+
     async def _delete_antigravity_account(self, filename: str) -> bool:
         """
         从 accounts.toml 中删除单个账户，并备份整个 accounts.toml 文件
@@ -553,6 +646,9 @@ class FileStorageManager:
             import shutil
             shutil.copy2(accounts_toml_path, backup_path)
             log.info(f"accounts.toml backed up to: {backup_path}")
+
+            # 清理旧备份
+            await self._cleanup_old_antigravity_backups(backup_dir)
 
             # 从 accounts.toml 中删除账户
             accounts_data['accounts'] = [
@@ -661,6 +757,22 @@ class FileStorageManager:
                                         log.debug(f"Account {user_id} missing 'last_success' field, using current time")
                                         state_data['last_success'] = time.time()
 
+                                    # freeze_status 字段（冻结状态）- 支持新旧两种格式
+                                    if 'freeze_status' in account and isinstance(account['freeze_status'], dict):
+                                        # 旧的嵌套格式
+                                        state_data['freeze_status'] = account['freeze_status']
+                                    elif 'freeze_frozen' in account:
+                                        # 新的扁平化格式，重构为嵌套字典
+                                        state_data['freeze_status'] = {
+                                            'frozen': account.get('freeze_frozen'),
+                                            'freeze_time': account.get('freeze_time'),
+                                            'is_owner': account.get('freeze_is_owner'),
+                                            'delete_reason': account.get('freeze_delete_reason'),
+                                            'auto_delete_time': account.get('freeze_auto_delete_time'),
+                                        } if account.get('freeze_frozen') else None
+                                    else:
+                                        state_data['freeze_status'] = None
+
                                     # Antigravity 只需要核心状态字段，不需要 CLI 的统计字段
                                     return state_data
 
@@ -738,6 +850,18 @@ class FileStorageManager:
                 if field not in state_data:
                     state_data[field] = default_state[field]
 
+            # 重构 freeze_status：将扁平化字段转换为嵌套字典（兼容前端）
+            if state_data.get("freeze_frozen"):
+                state_data["freeze_status"] = {
+                    "frozen": state_data.get("freeze_frozen"),
+                    "freeze_time": state_data.get("freeze_time"),
+                    "is_owner": state_data.get("freeze_is_owner"),
+                    "delete_reason": state_data.get("freeze_delete_reason"),
+                    "auto_delete_time": state_data.get("freeze_auto_delete_time"),
+                }
+            else:
+                state_data["freeze_status"] = None
+
             return state_data
 
         except Exception as e:
@@ -766,6 +890,18 @@ class FileStorageManager:
                     if field not in state_data:
                         state_data[field] = default_state[field]
 
+                # 重构 freeze_status：将扁平化字段转换为嵌套字典（兼容前端）
+                if state_data.get("freeze_frozen"):
+                    state_data["freeze_status"] = {
+                        "frozen": state_data.get("freeze_frozen"),
+                        "freeze_time": state_data.get("freeze_time"),
+                        "is_owner": state_data.get("freeze_is_owner"),
+                        "delete_reason": state_data.get("freeze_delete_reason"),
+                        "auto_delete_time": state_data.get("freeze_auto_delete_time"),
+                    }
+                else:
+                    state_data["freeze_status"] = None
+
                 states[filename] = state_data
 
             # 处理 Antigravity 账户状态（来自 accounts.toml）
@@ -782,11 +918,29 @@ class FileStorageManager:
                             if user_id:
                                 virtual_filename = f"userID_{user_id}"
                                 # 只提取 Antigravity 需要的核心状态字段（不要 CLI 的统计字段）
+
+                                # 处理 freeze_status - 支持新旧两种格式
+                                freeze_status = None
+                                if 'freeze_status' in account and isinstance(account['freeze_status'], dict):
+                                    # 旧的嵌套格式
+                                    freeze_status = account['freeze_status']
+                                elif 'freeze_frozen' in account:
+                                    # 新的扁平化格式，重构为嵌套字典
+                                    if account.get('freeze_frozen'):
+                                        freeze_status = {
+                                            'frozen': account.get('freeze_frozen'),
+                                            'freeze_time': account.get('freeze_time'),
+                                            'is_owner': account.get('freeze_is_owner'),
+                                            'delete_reason': account.get('freeze_delete_reason'),
+                                            'auto_delete_time': account.get('freeze_auto_delete_time'),
+                                        }
+
                                 state_data = {
                                     'disabled': account.get('disabled', False),
                                     'error_codes': account.get('error_codes', []),
                                     'last_success': account.get('last_success', time.time()),
                                     'user_email': account.get('email'),
+                                    'freeze_status': freeze_status,  # 冻结状态
                                 }
                                 states[virtual_filename] = state_data
                         log.debug(f"Added states for {len(accounts_data['accounts'])} Antigravity accounts")
