@@ -32,6 +32,8 @@ class IPManager:
         self._initialized = False
         # 封禁操作记录文件路径（不再使用内存存储）
         self._ban_operations_file = None
+        # 限速恢复时间戳（每3小时恢复一次）
+        self._last_rate_limit_recovery_time = 0
 
     async def initialize(self):
         """初始化 IP 管理器"""
@@ -102,12 +104,18 @@ class IPManager:
                 log.error(f"Error in periodic save: {e}")
 
     async def _periodic_unban_check(self):
-        """定期检查并自动解封24小时后的IP + 清理3天未访问的IP"""
+        """定期检查并自动解封24小时后的IP + 清理3天未访问的IP + 每3小时恢复限速"""
         while True:
             try:
                 await asyncio.sleep(1800)  # 每30分钟检查一次（减少解封延迟）
                 await self._auto_unban_expired_ips()
-                await self._cleanup_old_ips()  # 新增：清理旧IP记录
+                await self._cleanup_old_ips()  # 清理旧IP记录
+
+                # 检查是否需要恢复限速（每3小时执行一次）
+                current_time = time.time()
+                if current_time - self._last_rate_limit_recovery_time >= 10800:  # 3小时 = 10800秒
+                    await self._auto_recover_rate_limits()
+                    self._last_rate_limit_recovery_time = current_time
             except Exception as e:
                 log.error(f"Error in periodic unban check: {e}")
 
@@ -207,6 +215,57 @@ class IPManager:
                     f"Low-freq(<50,3d): {cleanup_stats['low_freq']}"
                 )
 
+    async def _auto_recover_rate_limits(self):
+        """
+        自动恢复限速：每3小时给所有被限速的IP增加1次/分钟
+
+        恢复规则：
+        - 当前限速每分钟X次 → 增加1次 → 每分钟(X+1)次
+        - 当达到每分钟15次时，自动移除限速（恢复为 active）
+        - 不对单个IP单独检查，统一批量处理以节省资源
+        """
+        async with self._cache_lock:
+            if "ips" not in self._ip_cache:
+                return
+
+            recovery_count = 0
+            removed_count = 0
+
+            for ip, ip_data in list(self._ip_cache["ips"].items()):
+                if ip_data.get("status") != "rate_limited":
+                    continue
+
+                # 获取当前限速秒数
+                current_rate_limit_seconds = ip_data.get("rate_limit_seconds", 6)
+
+                # 计算当前每分钟次数
+                current_requests_per_min = round(60 / current_rate_limit_seconds)
+
+                # 增加1次
+                new_requests_per_min = current_requests_per_min + 1
+
+                # 如果达到或超过15次，移除限速
+                if new_requests_per_min >= 15:
+                    ip_data["status"] = "active"
+                    # 移除 rate_limit_seconds 字段
+                    if "rate_limit_seconds" in ip_data:
+                        del ip_data["rate_limit_seconds"]
+                    removed_count += 1
+                    log.info(f"Auto-removed rate limit for IP {ip} (reached 15 requests/min)")
+                else:
+                    # 更新限速秒数
+                    new_rate_limit_seconds = round(60 / new_requests_per_min)
+                    ip_data["rate_limit_seconds"] = new_rate_limit_seconds
+                    recovery_count += 1
+
+                self._cache_dirty = True
+
+            if recovery_count > 0 or removed_count > 0:
+                log.info(
+                    f"Auto-recovery rate limits: {recovery_count} IPs increased (+1 req/min), "
+                    f"{removed_count} IPs fully recovered (removed limit)"
+                )
+
     def _ensure_initialized(self):
         """确保已初始化"""
         if not self._initialized:
@@ -248,7 +307,7 @@ class IPManager:
                 # 检查限速
                 if ip_data.get("status") == "rate_limited":
                     last_request = ip_data.get("last_request_time", 0)
-                    rate_limit = ip_data.get("rate_limit_seconds", 60)
+                    rate_limit = ip_data.get("rate_limit_seconds", 6)  # 默认6秒 = 每分钟10次
                     if time.time() - last_request < rate_limit:
                         log.warning(f"Rate limited IP: {ip}")
                         return False
@@ -290,7 +349,7 @@ class IPManager:
                 # 检查限速
                 if ip_data.get("status") == "rate_limited":
                     last_request = ip_data.get("last_request_time", 0)
-                    rate_limit = ip_data.get("rate_limit_seconds", 60)
+                    rate_limit = ip_data.get("rate_limit_seconds", 6)  # 默认6秒 = 每分钟10次
                     if time.time() - last_request < rate_limit:
                         log.warning(f"Rate limited IP: {ip}")
                         return False
@@ -556,6 +615,67 @@ class IPManager:
         except Exception as e:
             log.error(f"Failed to record ban operation: {e}")
 
+    async def _calculate_ip_credits(self, ip: str) -> float:
+        """
+        计算IP的今日积分消耗（从models_used累加）
+
+        Args:
+            ip: IP地址
+
+        Returns:
+            今日累计积分
+        """
+        try:
+            # 读取模型积分配置
+            import toml
+            import os
+            from .config import config
+
+            credentials_dir = await config.get_credentials_dir()
+            credits_toml_file = os.path.join(credentials_dir, "model_credits.toml")
+
+            if not os.path.exists(credits_toml_file):
+                log.warning(f"Model credits file not found: {credits_toml_file}")
+                # 如果文件不存在，按每次请求0.4积分估算
+                return self._ip_cache.get("ips", {}).get(ip, {}).get("today_requests", 0) * 0.4
+
+            with open(credits_toml_file, "r", encoding="utf-8") as f:
+                credits_data = toml.load(f)
+
+            # 获取IP的models_used
+            ip_data = self._ip_cache.get("ips", {}).get(ip, {})
+            models_used = ip_data.get("models_used", {})
+
+            if not models_used:
+                # 如果没有模型使用记录，返回0
+                return 0.0
+
+            total_credits = 0.0
+            default_score = credits_data.get("default", {}).get("score", 0.4)
+
+            # 累加每个模型的积分
+            for model_name, count in models_used.items():
+                # 先在antigravity组查找
+                if "antigravity" in credits_data and model_name in credits_data["antigravity"]:
+                    score = credits_data["antigravity"][model_name]
+                # 再在geminicli组查找
+                elif "geminicli" in credits_data and model_name in credits_data["geminicli"]:
+                    score = credits_data["geminicli"][model_name]
+                # 使用默认积分
+                else:
+                    score = default_score
+                    log.debug(f"Model {model_name} not found in credits config, using default {default_score}")
+
+                total_credits += score * count
+
+            log.debug(f"IP {ip} today credits: {total_credits:.2f} from {len(models_used)} models")
+            return total_credits
+
+        except Exception as e:
+            log.error(f"Error calculating IP credits: {e}")
+            # 出错时使用today_requests * 0.4作为后备
+            return self._ip_cache.get("ips", {}).get(ip, {}).get("today_requests", 0) * 0.4
+
     async def _check_ban_operation_limit(self, operator_ip: str) -> tuple[bool, str]:
         """
         检查操作者的封禁操作频率限制（从文件读取，自动清理过期记录）
@@ -610,18 +730,25 @@ class IPManager:
             log.error(f"Invalid IP status: {status}")
             return False, "无效的状态类型"
 
+        # 限速操作的额外检查
+        if status == "rate_limited":
+            if not rate_limit_seconds or rate_limit_seconds < 1 or rate_limit_seconds > 60:
+                log.error(f"Invalid rate_limit_seconds: {rate_limit_seconds}")
+                return False, "限速时间必须在1-60秒之间（对应每分钟60-1次）"
+
         async with self._cache_lock:
             if "ips" not in self._ip_cache:
                 self._ip_cache["ips"] = {}
 
             # 封禁操作的额外检查
             if status == "banned":
-                # 检查1：今日请求少于80次不能被封禁（保护新用户体验）
+                # 检查1：今日积分少于60不能被封禁（保护新用户体验，避免高端模型一刀切）
                 if ip in self._ip_cache["ips"]:
-                    today_requests = self._ip_cache["ips"][ip].get("today_requests", 0)
-                    if today_requests < 80:
-                        log.warning(f"Cannot ban IP {ip}: only {today_requests} requests today (minimum 80)")
-                        return False, f"今日请求仅 {today_requests} 次，少于80次不能封禁（保护每位用户体验）"
+                    today_credits = await self._calculate_ip_credits(ip)
+                    if today_credits < 60:
+                        today_requests = self._ip_cache["ips"][ip].get("today_requests", 0)
+                        log.warning(f"Cannot ban IP {ip}: only {today_credits:.2f} credits today (minimum 60, {today_requests} requests)")
+                        return False, f"今日积分仅 {today_credits:.1f}，少于60积分不能封禁（已使用{today_requests}次请求，保护每位用户体验）"
 
                 # 检查2：操作者封禁频率限制
                 if operator_ip:

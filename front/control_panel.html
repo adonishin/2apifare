@@ -1399,39 +1399,144 @@
             margin-top: 10px;
         }
 
+        /* =========================================
+           IP 操作按钮 - 重装机甲故障协议风格
+           ========================================= */
+
+        /* 基础样式 */
         .ip-btn {
-            padding: 6px 12px;
+            position: relative;
+            appearance: none;
             border: none;
-            border-radius: 4px;
-            font-size: 12px;
+            outline: none;
+            background: #111;
+            color: #666;
+
+            /* 布局与字体 */
+            padding: 10px 28px 10px 20px;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 11px;
+            font-weight: 900;
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
             cursor: pointer;
-            transition: background-color 0.2s;
-            color: white;
+            overflow: hidden;
+
+            /* 复杂的切角设计（机械感） */
+            clip-path: polygon(
+                10px 0, 100% 0,
+                100% calc(100% - 10px), calc(100% - 10px) 100%,
+                0 100%, 0 10px
+            );
+
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+
+            /* 微弱的内部边框 */
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);
         }
 
-        .ip-btn.enable {
-            background-color: #28a745;
+        /* 状态颜色映射 */
+        .ip-btn.enable { --theme: #00ff9d; --shadow-clr: rgba(0, 255, 157, 0.4); }
+        .ip-btn.ban { --theme: #ff0055; --shadow-clr: rgba(255, 0, 85, 0.4); }
+        .ip-btn.rate-limit { --theme: #ffcc00; --shadow-clr: rgba(255, 204, 0, 0.4); }
+
+        /* 复合背景纹理（网格 + 斜条纹） */
+        .ip-btn::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+
+            background:
+                linear-gradient(90deg, transparent 50%, rgba(0,0,0,0.8) 50%),
+                repeating-linear-gradient(
+                    -45deg,
+                    transparent,
+                    transparent 5px,
+                    var(--theme) 5px,
+                    var(--theme) 6px,
+                    transparent 6px,
+                    transparent 12px
+                );
+            background-size: 4px 100%, 20px 20px;
+
+            opacity: 0.05;
+            z-index: 0;
+            transform: translateX(-100%) skewX(-15deg);
+            transition: transform 0.4s cubic-bezier(0.19, 1, 0.22, 1), opacity 0.3s;
         }
 
-        .ip-btn.enable:hover {
-            background-color: #218838;
+        /* 左侧能量指示条 */
+        .ip-btn::after {
+            content: '';
+            position: absolute;
+            left: 0; top: 0; bottom: 0;
+            width: 3px;
+            background: var(--theme);
+            box-shadow: 0 0 5px var(--theme);
+            z-index: 1;
+            transition: width 0.2s, box-shadow 0.2s;
         }
 
-        .ip-btn.ban {
-            background-color: #dc3545;
+        /* 悬停状态 */
+        .ip-btn:hover {
+            color: #fff;
+            background: #1a1a1a;
+            padding-left: 32px;
+            text-shadow: 0 0 5px var(--theme);
         }
 
-        .ip-btn.ban:hover {
-            background-color: #c82333;
+        .ip-btn:hover::before {
+            opacity: 0.15;
+            transform: translateX(0) skewX(-15deg);
+            animation: tactical-scan 2s linear infinite;
         }
 
-        .ip-btn.rate-limit {
-            background-color: #ffc107;
-            color: #333;
+        .ip-btn:hover::after {
+            width: 5px;
+            box-shadow: 0 0 15px var(--theme), 0 0 25px var(--theme);
+            animation: pulse-bar 0.8s ease-in-out infinite alternate;
         }
 
-        .ip-btn.rate-limit:hover {
-            background-color: #e0a800;
+        /* 点击状态 */
+        .ip-btn:active {
+            transform: scale(0.98);
+        }
+
+        /* 禁用状态 */
+        .ip-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+            filter: grayscale(1);
+        }
+
+        /* 伪随机故障效果 */
+        .ip-btn:nth-child(odd):hover {
+            animation: glitch-skew 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) both infinite;
+            color: var(--theme);
+        }
+
+        .ip-btn:nth-child(even):hover {
+            animation: glitch-skew 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94) reverse both infinite;
+        }
+
+        /* 动画关键帧 */
+        @keyframes tactical-scan {
+            0% { background-position: 0 0, 0 0; }
+            100% { background-position: 0 0, 40px 0; }
+        }
+
+        @keyframes pulse-bar {
+            from { opacity: 0.8; }
+            to { opacity: 1; box-shadow: 0 0 30px var(--theme); }
+        }
+
+        @keyframes glitch-skew {
+            0% { transform: skew(0deg); }
+            20% { transform: skew(-2deg); }
+            40% { transform: skew(2deg); }
+            60% { transform: skew(-1deg); }
+            80% { transform: skew(1deg); }
+            100% { transform: skew(0deg); }
         }
 
         /* 限制设置弹窗样式 */
@@ -2913,6 +3018,571 @@
                 background: rgba(66, 133, 244, 0.2);
             }
         }
+
+        /* ========================================
+           模型积分配置 - 现代科技风格 (Based on Nexus Protocol Design)
+           ======================================== */
+
+        /* Google Fonts Import */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+        /* CSS 变量定义 */
+        :root {
+            --accent-green: #4ade80;
+            --accent-red: #ef4444;
+            --grid-color: rgba(255, 255, 255, 0.03);
+        }
+
+        /* 模态框遮罩层 - 透明背景，让主页面背景透过 */
+        .glass-modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.3); /* 半透明，让主页面背景透过 */
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            z-index: 10000;
+            animation: modalFadeIn 0.3s ease;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        /* 背景环境特效 - 叠加在主页面背景之上 */
+        .ambient-glow {
+            position: absolute;
+            width: 100vw;
+            height: 100vh;
+            z-index: 0;
+            overflow: hidden;
+            pointer-events: none;
+        }
+
+        .ambient-orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(120px);
+            opacity: 0.12; /* 降低不透明度，作为叠加层 */
+            animation: floatOrb 20s infinite ease-in-out;
+            mix-blend-mode: screen; /* 叠加混合模式，与主背景融合 */
+        }
+
+        .orb-1 {
+            width: 900px;
+            height: 900px;
+            background: radial-gradient(circle, rgba(124, 58, 237, 0.5), transparent 70%);
+            top: -30%;
+            left: -20%;
+            animation-delay: 0s;
+        }
+
+        .orb-2 {
+            width: 800px;
+            height: 800px;
+            background: radial-gradient(circle, rgba(14, 165, 233, 0.5), transparent 70%);
+            bottom: -20%;
+            right: -10%;
+            animation-delay: -5s;
+        }
+
+        @keyframes floatOrb {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            50% { transform: translate(50px, 80px) scale(1.1); }
+        }
+
+        /* 3D 移动网格 (Perspective Grid) - 降低不透明度 */
+        .perspective-grid-container {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            perspective: 800px;
+            overflow: hidden;
+            pointer-events: none;
+            opacity: 0.4; /* 整体降低网格不透明度 */
+        }
+
+        .grid-plane {
+            position: absolute;
+            top: 50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background-image:
+                linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+            background-size: 60px 60px;
+            transform: rotateX(75deg);
+            transform-origin: 50% 0;
+            animation: gridMove 10s linear infinite;
+            mask-image: linear-gradient(to bottom, transparent 0%, black 40%);
+            -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 40%);
+        }
+
+        @keyframes gridMove {
+            0% { background-position: 0 0; }
+            100% { background-position: 0 60px; }
+        }
+
+        /* 星尘背景 (Static Stars) - 降低不透明度 */
+        .stars-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            background-image:
+                radial-gradient(1px 1px at 20px 30px, #eee, rgba(0,0,0,0)),
+                radial-gradient(1px 1px at 100px 70px, #fff, rgba(0,0,0,0)),
+                radial-gradient(1.5px 1.5px at 150px 200px, #ccc, rgba(0,0,0,0)),
+                radial-gradient(1px 1px at 300px 50px, #eee, rgba(0,0,0,0)),
+                radial-gradient(2px 2px at 400px 300px, #fff, rgba(0,0,0,0));
+            background-size: 500px 500px;
+            opacity: 0.15; /* 降低星星不透明度 */
+            animation: twinkle 5s infinite alternate;
+        }
+
+        @keyframes twinkle {
+            0% { opacity: 0.1; }
+            100% { opacity: 0.2; }
+        }
+
+        /* 流星效果 (Meteors) */
+        .meteors-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            pointer-events: none;
+            overflow: hidden;
+        }
+
+        .meteor {
+            position: absolute;
+            width: 150px;
+            height: 1px;
+            background: linear-gradient(to right, rgba(255,255,255,0) 0%, rgba(255,255,255,1) 50%, rgba(255,255,255,0) 100%);
+            transform: rotate(-45deg);
+            opacity: 0;
+            filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.8));
+            animation: meteorShoot 2s linear forwards;
+        }
+
+        @keyframes meteorShoot {
+            0% {
+                transform: rotate(-45deg) translateX(0);
+                opacity: 0;
+            }
+            10% {
+                opacity: 1;
+            }
+            100% {
+                transform: rotate(-45deg) translateX(-800px);
+                opacity: 0;
+            }
+        }
+
+        .glass-modal-overlay.show {
+            display: flex;
+        }
+
+        /* 主卡片容器 - 科技感卡片 (更透明) */
+        .glass-modal-card {
+            position: relative;
+            z-index: 10;
+            width: 100%;
+            max-width: 720px;
+            height: 85vh;
+            border-radius: 24px;
+            background: rgba(15, 15, 20, 0.75);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow:
+                0 0 0 1px rgba(255, 255, 255, 0.05) inset,
+                0 20px 50px rgba(0, 0, 0, 0.5),
+                0 0 100px rgba(0, 0, 0, 0.5);
+            isolation: isolate;
+            transform-style: preserve-3d;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            animation: modalSlideIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        /* 扫描线效果 (Scanline) */
+        .scanline-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(
+                to bottom,
+                rgba(255,255,255,0),
+                rgba(255,255,255,0) 50%,
+                rgba(0,0,0,0.1) 50%,
+                rgba(0,0,0,0.1)
+            );
+            background-size: 100% 4px;
+            z-index: 5;
+            pointer-events: none;
+            opacity: 0.3;
+            mix-blend-mode: overlay;
+        }
+
+        /* Canvas 粒子层 */
+        #particleCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            pointer-events: none;
+            opacity: 0.6;
+        }
+
+        /* 噪点纹理层 */
+        .noise-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+            opacity: 0.05;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+        }
+
+        /* 聚光灯跟随层 */
+        .spotlight-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 2;
+            background: radial-gradient(
+                600px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+                rgba(255, 255, 255, 0.06),
+                transparent 40%
+            );
+            transition: opacity 0.5s;
+        }
+
+        /* 内容层 */
+        .card-interface {
+            position: relative;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            background: rgba(10, 10, 12, 0.3);
+        }
+
+        /* Header */
+        .glass-modal-header {
+            padding: 32px 36px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            background: rgba(255, 255, 255, 0.01);
+            flex-shrink: 0;
+        }
+
+        .header-title h2 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 700;
+            font-size: 20px;
+            letter-spacing: -0.02em;
+            text-transform: uppercase;
+            margin: 0 0 4px;
+            background: linear-gradient(180deg, #fff, rgba(255,255,255,0.7));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header-title p {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.6);
+            font-family: 'JetBrains Mono', monospace;
+            margin: 0;
+        }
+
+        .window-controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        /* 3D 真实感月亮按钮样式 */
+        .moon-close-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            position: relative;
+            cursor: pointer;
+
+            /* 球体基础光影：从左上(光照)到右下(阴影) */
+            background: radial-gradient(
+                circle at 30% 30%,
+                #f1f5f9 0%,       /* 高光区：亮白 */
+                #cbd5e1 30%,      /* 过渡区：浅灰 */
+                #64748b 60%,      /* 阴影区：深蓝灰 */
+                #1e293b 100%      /* 背光区：近黑 */
+            );
+
+            /* 外部发光 + 内部阴影增强立体感 */
+            box-shadow:
+                0 0 12px rgba(255, 255, 255, 0.2), /* 外辉光 */
+                inset -3px -3px 6px rgba(0, 0, 0, 0.6); /* 内部阴影 */
+
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            overflow: hidden;
+        }
+
+        /* 月球纹理 (Craters) - 使用伪元素模拟陨石坑 */
+        .moon-close-btn::before,
+        .moon-close-btn::after {
+            content: '';
+            position: absolute;
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.15);
+            box-shadow: inset 1px 1px 2px rgba(0, 0, 0, 0.3);
+        }
+
+        /* 大陨石坑 */
+        .moon-close-btn::before {
+            width: 8px;
+            height: 8px;
+            top: 18px;
+            left: 8px;
+            opacity: 0.6;
+        }
+
+        /* 小陨石坑 */
+        .moon-close-btn::after {
+            width: 5px;
+            height: 5px;
+            top: 8px;
+            left: 16px;
+            opacity: 0.5;
+            box-shadow: inset 1px 1px 1px rgba(0,0,0,0.3);
+        }
+
+        /* 额外的纹理点缀 */
+        .crater-extra {
+            position: absolute;
+            width: 3px;
+            height: 3px;
+            top: 22px;
+            left: 20px;
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.1);
+            pointer-events: none;
+        }
+
+        /* 悬停效果：月亮变亮，轻微旋转 */
+        .moon-close-btn:hover {
+            box-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
+            transform: scale(1.1) rotate(-10deg);
+        }
+
+        /* 点击效果 */
+        .moon-close-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* 滚动区域 */
+        .glass-modal-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0 36px 20px 36px;
+            scrollbar-width: none;
+        }
+
+        .glass-modal-content::-webkit-scrollbar {
+            display: none;
+        }
+
+        /* 分组标题 */
+        .group-header {
+            position: relative;
+            padding: 24px 0 12px 0;
+            margin-bottom: 8px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.35);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+        }
+
+        /* 模型行 */
+        .model-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 12px;
+            margin: 4px 0;
+            border-radius: 8px;
+            border: 1px solid transparent;
+            transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .model-row:hover {
+            background: rgba(255, 255, 255, 0.04);
+            border-color: rgba(255, 255, 255, 0.1);
+            transform: translateX(2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+
+        .model-row::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: #fff;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .model-row:hover::before {
+            opacity: 1;
+        }
+
+        .row-info {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .row-name {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            color: #ffffff;
+        }
+
+        .row-desc {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.6);
+            font-weight: 300;
+        }
+
+        .row-score {
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 600;
+            font-size: 15px;
+            color: #ffffff;
+            background: rgba(255,255,255,0.06);
+            padding: 6px 12px;
+            border-radius: 6px;
+            border: 1px solid transparent;
+            min-width: 60px;
+            text-align: center;
+        }
+
+        .model-row:hover .row-score {
+            background: rgba(255,255,255,0.15);
+            border-color: rgba(255,255,255,0.3);
+            box-shadow: 0 0 15px rgba(255,255,255,0.1);
+        }
+
+        /* Footer */
+        .card-footer {
+            padding: 20px 36px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(0,0,0,0.2);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.35);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            background: #4ade80;
+            border-radius: 50%;
+            box-shadow: 0 0 8px #4ade80;
+            display: inline-block;
+            margin-right: 6px;
+        }
+
+        .list-spacer {
+            height: 20px;
+        }
+
+        /* Loading */
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: rgba(255, 255, 255, 0.6);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+        }
+
+        /* 动画 */
+        @keyframes modalFadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-20px) scale(0.95);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        /* 移动端优化 */
+        @media (max-width: 768px) {
+            .glass-modal-card {
+                max-width: 95%;
+                height: 90vh;
+            }
+
+            .glass-modal-header {
+                padding: 24px 20px;
+            }
+
+            .header-title h2 {
+                font-size: 18px;
+            }
+
+            .glass-modal-content {
+                padding: 0 20px 20px 20px;
+            }
+
+            .card-footer {
+                padding: 16px 20px;
+                font-size: 9px;
+            }
+        }
     </style>
 </head>
 
@@ -3534,6 +4204,7 @@
                         <button class="refresh-btn" onclick="refreshIPStats()">刷新统计</button>
                         <button class="refresh-btn" id="sortByTodayBtn" onclick="sortIPListBy('today')">今日请求</button>
                         <button class="refresh-btn" id="sortByTotalBtn" onclick="sortIPListBy('total')">历史请求</button>
+                        <button class="refresh-btn" id="modelCreditsBtn" onclick="openModelCreditsModal()">积分配置</button>
                     </div>
 
                     <!-- IP 列表 -->
@@ -6766,6 +7437,394 @@ docker run -e GCLI_CREDS_1='{"client_id":"..."}' \
         const itemsPerPage = 20;
         let currentIPSortBy = 'today';  // 默认按今日请求排序 ('today' 或 'total')
 
+        // 打开积分配置模态框
+        // 粒子动画全局变量
+        let particleAnimationId = null;
+        let particles = [];
+        let canvas, ctx, card, spotlight;
+
+        // 打开积分配置模态框
+        async function openModelCreditsModal() {
+            const modal = document.getElementById('modelCreditsModal');
+            if (modal) {
+                modal.classList.add('show');
+                document.body.style.overflow = 'hidden';
+
+                // 初始化粒子动画
+                initParticles();
+
+                // 初始化流星系统
+                initMeteors();
+
+                // 加载积分配置数据
+                await loadModelCreditsData();
+            }
+        }
+
+        // 关闭积分配置模态框
+        function closeModelCreditsModal(event) {
+            if (event && event.target.id !== 'modelCreditsModal') {
+                return;
+            }
+
+            const modal = document.getElementById('modelCreditsModal');
+            if (modal) {
+                modal.classList.remove('show');
+                document.body.style.overflow = '';
+
+                // 停止粒子动画
+                if (particleAnimationId) {
+                    cancelAnimationFrame(particleAnimationId);
+                    particleAnimationId = null;
+                }
+            }
+        }
+
+        // 初始化粒子系统
+        function initParticles() {
+            canvas = document.getElementById('particleCanvas');
+            ctx = canvas.getContext('2d');
+            card = document.getElementById('creditsCard');
+            spotlight = document.getElementById('spotlightLayer');
+
+            if (!canvas || !ctx || !card) return;
+
+            // 设置 Canvas 尺寸
+            const resizeCanvas = () => {
+                canvas.width = card.offsetWidth;
+                canvas.height = card.offsetHeight;
+            };
+            resizeCanvas();
+
+            // 初始化粒子
+            particles = [];
+            const particleCount = Math.floor((canvas.width * canvas.height) / 9000);
+            for (let i = 0; i < particleCount; i++) {
+                particles.push(new Particle());
+            }
+
+            // 鼠标跟随聚光灯
+            card.addEventListener('mousemove', (e) => {
+                const rect = card.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                spotlight.style.setProperty('--mouse-x', `${x}px`);
+                spotlight.style.setProperty('--mouse-y', `${y}px`);
+
+                // 粒子逃离鼠标
+                particles.forEach(p => {
+                    const dx = p.x - x;
+                    const dy = p.y - y;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    if (dist < 100) {
+                        const force = (100 - dist) / 100;
+                        p.vx += (dx/dist) * force * 0.05;
+                        p.vy += (dy/dist) * force * 0.05;
+                    }
+                });
+            });
+
+            // 启动动画
+            animateParticles();
+        }
+
+        // 粒子类
+        class Particle {
+            constructor() {
+                this.x = Math.random() * canvas.width;
+                this.y = Math.random() * canvas.height;
+                this.vx = (Math.random() - 0.5) * 0.25;
+                this.vy = (Math.random() - 0.5) * 0.25;
+                this.size = Math.random() * 1.5;
+                this.alpha = Math.random() * 0.5 + 0.2;
+            }
+
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+
+                // 边界反弹
+                if (this.x < 0 || this.x > canvas.width) this.vx *= -1;
+                if (this.y < 0 || this.y > canvas.height) this.vy *= -1;
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255, 255, 255, ${this.alpha})`;
+                ctx.fill();
+            }
+        }
+
+        // 动画循环
+        function animateParticles() {
+            if (!ctx || !canvas) return;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 绘制粒子和连线
+            particles.forEach((p, i) => {
+                p.update();
+                p.draw();
+
+                // 连线效果
+                for (let j = i + 1; j < particles.length; j++) {
+                    const p2 = particles[j];
+                    const dx = p.x - p2.x;
+                    const dy = p.y - p2.y;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+
+                    if (dist < 100) {
+                        ctx.beginPath();
+                        const opacity = 1 - (dist / 100);
+                        ctx.strokeStyle = `rgba(255, 255, 255, ${opacity * 0.15})`;
+                        ctx.lineWidth = 0.5;
+                        ctx.moveTo(p.x, p.y);
+                        ctx.lineTo(p2.x, p2.y);
+                        ctx.stroke();
+                    }
+                }
+            });
+
+            particleAnimationId = requestAnimationFrame(animateParticles);
+        }
+
+        // 流星系统
+        function initMeteors() {
+            const container = document.getElementById('meteorContainer');
+            if (!container) return;
+
+            function spawnMeteor() {
+                const meteor = document.createElement('div');
+                meteor.className = 'meteor';
+
+                // 随机位置 (从顶部和右侧生成)
+                const startX = Math.random() * window.innerWidth;
+                meteor.style.left = startX + 'px';
+                meteor.style.top = Math.random() * (window.innerHeight / 2) + 'px';
+
+                // 随机大小
+                const scale = 0.5 + Math.random() * 0.8;
+                meteor.style.transform = `rotate(-45deg) scale(${scale})`;
+
+                // 随机持续时间
+                const duration = 1.5 + Math.random() * 1.5;
+                meteor.style.animationDuration = duration + 's';
+
+                container.appendChild(meteor);
+
+                // 清理
+                setTimeout(() => {
+                    meteor.remove();
+                }, duration * 1000 + 100);
+
+                // 调度下一个流星
+                setTimeout(spawnMeteor, Math.random() * 2000 + 500);
+            }
+
+            // 启动流星生成
+            spawnMeteor();
+        }
+
+        // ESC键关闭模态框
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                const modal = document.getElementById('modelCreditsModal');
+                if (modal && modal.classList.contains('show')) {
+                    closeModelCreditsModal();
+                }
+            }
+        });
+
+        // 加载模型积分配置数据
+        async function loadModelCreditsData() {
+            const container = document.getElementById('modelCreditsContent');
+
+            try {
+                // 显示加载状态
+                container.innerHTML = '<div class="loading">LOADING CONFIGURATION...</div>';
+
+                // 从公开API获取数据（从creds/目录读取，无需认证）
+                const response = await fetch('/public/model-credits');
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                console.log('成功加载积分配置:', data);
+
+                // 生成HTML内容
+                container.innerHTML = generateModelCreditsHTML(data);
+
+            } catch (error) {
+                console.error('Failed to load model credits:', error);
+                const errorMsg = error.message || 'UNKNOWN ERROR';
+                container.innerHTML = `
+                    <div style="color: rgba(255, 100, 100, 0.9); text-align: center; padding: 40px; font-family: 'JetBrains Mono', monospace;">
+                        <h3 style="margin-bottom: 16px; font-size: 16px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">LOAD FAILED</h3>
+                        <p style="font-size: 12px; opacity: 0.7; margin-bottom: 24px;">${errorMsg}</p>
+                        <button onclick="loadModelCreditsData()" style="padding: 8px 20px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: #fff; border-radius: 6px; cursor: pointer; font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; transition: all 0.2s;">
+                            RETRY
+                        </button>
+                    </div>
+                `;
+            }
+        }
+
+        // 生成模型积分HTML
+        // 生成模型积分 HTML - 简洁科技风格
+        function generateModelCreditsHTML(data) {
+            let html = '';
+
+            // Antigravity 模型分组
+            if (data.antigravity && Object.keys(data.antigravity).length > 0) {
+                const antigravityModels = Object.entries(data.antigravity).map(([name, score]) => ({
+                    name, score, desc: getModelDescription(name)
+                }));
+
+                // 分为 Core 和 Lite & Experimental 组
+                const coreModels = antigravityModels.filter(m =>
+                    m.name.includes('gemini-3-pro') || m.name.includes('claude-sonnet-4-5')
+                );
+                const liteModels = antigravityModels.filter(m =>
+                    m.name.includes('flash') || m.name.includes('gpt-oss') || m.name.includes('rev19')
+                );
+
+                // ANTIGRAVITY / CORE - TIER 1
+                if (coreModels.length > 0) {
+                    coreModels.sort((a, b) => b.score - a.score);
+                    html += `<div class="group-header" data-tier="1">
+                        <span>ANTIGRAVITY / CORE</span>
+                        <span>TIER 1</span>
+                    </div>`;
+
+                    for (const model of coreModels) {
+                        html += `<div class="model-row">
+                            <div class="row-info">
+                                <span class="row-name">${model.name}</span>
+                                <span class="row-desc">${model.desc}</span>
+                            </div>
+                            <div class="row-score">${model.score.toFixed(2)}</div>
+                        </div>`;
+                    }
+
+                    html += '<br>';
+                }
+
+                // ANTIGRAVITY / LITE & EXPERIMENTAL - TIER 2
+                if (liteModels.length > 0) {
+                    liteModels.sort((a, b) => b.score - a.score);
+                    html += `<div class="group-header" data-tier="2">
+                        <span>ANTIGRAVITY / LITE & EXPERIMENTAL</span>
+                        <span>TIER 2</span>
+                    </div>`;
+
+                    for (const model of liteModels) {
+                        html += `<div class="model-row">
+                            <div class="row-info">
+                                <span class="row-name">${model.name}</span>
+                                <span class="row-desc">${model.desc}</span>
+                            </div>
+                            <div class="row-score">${model.score.toFixed(2)}</div>
+                        </div>`;
+                    }
+
+                    html += '<br>';
+                }
+            }
+
+            // GeminiCLI Pro Series
+            if (data.geminicli && Object.keys(data.geminicli).length > 0) {
+                const proModels = [];
+                const flashModels = [];
+
+                for (const [name, score] of Object.entries(data.geminicli)) {
+                    const model = { name, score, desc: getModelDescription(name) };
+                    if (name.includes('pro')) {
+                        proModels.push(model);
+                    } else {
+                        flashModels.push(model);
+                    }
+                }
+
+                // Pro 系列
+                if (proModels.length > 0) {
+                    proModels.sort((a, b) => b.score - a.score);
+                    html += `<div class="group-header" data-tier="3">
+                        <span>GEMINICLI / PRO SERIES</span>
+                        <span>TIER 3</span>
+                    </div>`;
+
+                    for (const model of proModels) {
+                        html += `<div class="model-row">
+                            <div class="row-info">
+                                <span class="row-name">${model.name}</span>
+                                <span class="row-desc">${model.desc}</span>
+                            </div>
+                            <div class="row-score">${model.score.toFixed(2)}</div>
+                        </div>`;
+                    }
+
+                    html += '<br>';
+                }
+
+                // Flash 系列
+                if (flashModels.length > 0) {
+                    flashModels.sort((a, b) => b.score - a.score);
+                    html += `<div class="group-header" data-tier="4">
+                        <span>GEMINICLI / FLASH SERIES</span>
+                        <span>TIER 4</span>
+                    </div>`;
+
+                    for (const model of flashModels) {
+                        html += `<div class="model-row">
+                            <div class="row-info">
+                                <span class="row-name">${model.name}</span>
+                                <span class="row-desc">${model.desc}</span>
+                            </div>
+                            <div class="row-score">${model.score.toFixed(2)}</div>
+                        </div>`;
+                    }
+                }
+            }
+
+            html += '<div class="list-spacer"></div>';
+            return html;
+        }
+
+        // 获取模型描述
+        function getModelDescription(modelName) {
+            const name = modelName.toLowerCase();
+
+            // Antigravity 模型
+            if (name.includes('gemini-3-pro-high')) return 'Benchmark Leader · LiveCodeBench 2439';
+            if (name.includes('gemini-3-pro-low')) return 'Balanced High-Performance';
+            if (name.includes('claude-sonnet-4-5-thinking')) return 'Chain of Thought · Reasoning++';
+            if (name.includes('claude-sonnet-4-5')) return 'SWE-Bench Excellence (77.2%)';
+            if (name.includes('gemini-2.5-flash-thinking')) return 'Lightweight Reasoning Model';
+            if (name.includes('gemini-2.5-flash-lite')) return 'Ultra Low Cost · Basic Tasks';
+            if (name.includes('gemini-2.5-flash') && !name.includes('lite') && !name.includes('thinking')) return 'Speed Optimized · Cost Effective';
+            if (name.includes('gpt-oss-120b')) return 'Open Source 120B · General Purpose';
+            if (name.includes('rev19-uic3')) return 'Experimental · Legacy Support';
+
+            // GeminiCLI Pro
+            if (name.includes('2.5-pro-search')) return 'Active Retrieval Generation';
+            if (name.includes('2.5-pro-maxthinking')) return 'Extended Context Processing';
+            if (name.includes('2.5-pro-preview')) return 'Preview Release · Stable Build';
+            if (name.includes('2.5-pro-nothinking')) return 'Direct Response · Zero CoT';
+            if (name.includes('2.5-pro') && !name.includes('search') && !name.includes('thinking') && !name.includes('preview')) return 'Best Value · Standard Pro';
+
+            // GeminiCLI Flash
+            if (name.includes('2.5-flash-search')) return 'Fast RAG · Low Latency';
+            if (name.includes('2.5-flash-maxthinking')) return 'Flash Reasoning · Efficient';
+            if (name.includes('2.5-flash-nothinking')) return 'Instant Response · Raw Output';
+            if (name.includes('2.5-flash') && !name.includes('search') && !name.includes('thinking')) return 'High Throughput Base';
+
+            return 'General Purpose Model';
+        }
+
         // 刷新 IP 统计
         async function refreshIPStats() {
             const ipLoading = document.getElementById('ipLoading');
@@ -7703,6 +8762,64 @@ docker run -e GCLI_CREDS_1='{"client_id":"..."}' \
             return text.replace(/[&<>"']/g, m => map[m]);
         }
     </script>
+
+    <!-- 积分配置模态框 - 赛博虚空设计 -->
+    <div id="modelCreditsModal" class="glass-modal-overlay">
+        <!-- 背景环境层 -->
+        <div class="ambient-glow">
+            <div class="ambient-orb orb-1"></div>
+            <div class="ambient-orb orb-2"></div>
+        </div>
+
+        <div class="stars-layer"></div>
+
+        <div class="perspective-grid-container">
+            <div class="grid-plane"></div>
+        </div>
+
+        <!-- 流星层 -->
+        <div class="meteors-container" id="meteorContainer"></div>
+
+        <!-- 主卡片 -->
+        <div class="glass-modal-card" id="creditsCard" onclick="event.stopPropagation()">
+            <!-- 1. 粒子动画层 -->
+            <canvas id="particleCanvas"></canvas>
+
+            <!-- 2. 噪点纹理层 -->
+            <div class="noise-layer"></div>
+
+            <!-- 3. 扫描线层 -->
+            <div class="scanline-layer"></div>
+
+            <!-- 4. 聚光灯跟随层 -->
+            <div class="spotlight-layer" id="spotlightLayer"></div>
+
+            <!-- 5. 内容交互层 -->
+            <div class="card-interface">
+                <div class="glass-modal-header">
+                    <div class="header-title">
+                        <h2>MODEL CREDITS</h2>
+                        <p>CREDIT_ALLOCATION_V2.0</p>
+                    </div>
+                    <div class="window-controls">
+                        <div class="moon-close-btn" onclick="closeModelCreditsModal()" title="Close">
+                            <div class="crater-extra"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="glass-modal-content" id="modelCreditsContent">
+                    <div class="loading">LOADING CONFIGURATION...</div>
+                </div>
+
+                <div class="card-footer">
+                    <div><span class="status-dot"></span>SYSTEM ONLINE</div>
+                    <div>REAL-TIME TOML SYNC</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
 </body>
 
 </html>

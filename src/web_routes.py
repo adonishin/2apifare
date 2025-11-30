@@ -1632,6 +1632,29 @@ async def save_config(request: ConfigSaveRequest, token: str = Depends(verify_to
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/public/model-credits")
+async def get_public_model_credits():
+    """获取模型积分配置（公开接口，无需认证，直接读取TOML）"""
+    try:
+        credentials_dir = await config.get_credentials_dir()
+        credits_toml_file = os.path.join(credentials_dir, "model_credits.toml")
+
+        if not os.path.exists(credits_toml_file):
+            raise HTTPException(status_code=404, detail="模型积分配置文件不存在")
+
+        # 直接读取TOML文件并返回JSON（实时读取，支持动态价格表）
+        with open(credits_toml_file, "r", encoding="utf-8") as f:
+            credits_data = toml.load(f)
+
+        return JSONResponse(content=credits_data)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"获取模型积分配置失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/auth/load-env-creds")
 async def load_env_credentials(token: str = Depends(verify_token)):
     """从环境变量加载凭证文件"""
@@ -2109,7 +2132,7 @@ async def refresh_ip_location(ip: str, token: str = Depends(verify_token)):
 class IPStatusUpdateRequest(BaseModel):
     ip: str
     status: str  # active, banned, rate_limited
-    rate_limit_seconds: Optional[int] = None
+    requests_per_minute: Optional[int] = None  # 每分钟允许请求次数（1-60）
     admin_password: Optional[str] = None  # 启用 IP 时需要管理员密码
 
 
@@ -2159,15 +2182,16 @@ async def update_ip_status(
     """
     更新 IP 状态
 
-    权限机制（狼人杀模式 - 每分钟请求次数）：
+    权限机制（狼人杀模式）：
     - 启用 IP (status=active)：需要管理员密码
     - 封禁 IP (status=banned)：无需密码，但有限制：
-      * 目标IP今日请求必须≥50次（保护新用户）
-      * 操作者30分钟内最多封禁5次（防止大规模封禁）
+      * 目标IP今日请求必须≥80次（保护新用户）
+      * 操作者1小时内最多封禁3次（防止大规模封禁）
     - 限速 IP (status=rate_limited)：
-      * 首次设置或减少次数（收紧限制）：无需密码
-      * 增加次数（放松限制）：需要管理员密码
-      注：后端存储为秒数，秒数越小 = 每分钟次数越多 = 限制越松
+      * 默认值：每分钟10次
+      * 范围：1-60次/分钟
+      * 减少次数（如10→5，更严格）：无需密码
+      * 增加次数（如10→15，更宽松）：需要管理员密码
 
     Args:
         req: 包含 IP 地址、状态和可选管理员密码的请求
@@ -2195,34 +2219,43 @@ async def update_ip_status(
             if req.admin_password != correct_admin_password:
                 raise HTTPException(status_code=403, detail="管理员密码错误")
 
-        # 限速操作：检查是否放松限制（秒数减少 = 每分钟次数增加）
-        elif req.status == "rate_limited" and req.rate_limit_seconds:
+        # 限速操作：验证每分钟次数范围
+        elif req.status == "rate_limited":
+            # 验证每分钟次数：1-60
+            if not req.requests_per_minute or req.requests_per_minute < 1 or req.requests_per_minute > 60:
+                raise HTTPException(status_code=400, detail="每分钟请求次数必须在 1-60 之间")
+
             # 获取当前 IP 的限速设置
             current_stats = await ip_manager.get_ip_stats(req.ip)
-            current_rate_limit = current_stats.get("rate_limit_seconds", 0) if current_stats else 0
+            current_rate_limit_seconds = current_stats.get("rate_limit_seconds", 0) if current_stats else 0
 
-            # 如果减少限速间隔（秒数变小 = 每分钟次数增加 = 放松限制），需要管理员密码
-            if current_rate_limit > 0 and req.rate_limit_seconds < current_rate_limit:
-                # 计算每分钟次数用于提示
-                current_requests_per_min = round(60 / current_rate_limit)
-                new_requests_per_min = round(60 / req.rate_limit_seconds)
+            # 如果增加次数（放松限制），需要管理员密码
+            if current_rate_limit_seconds > 0:
+                current_requests_per_min = round(60 / current_rate_limit_seconds)
 
-                if not req.admin_password:
-                    raise HTTPException(
-                        status_code=403,
-                        detail=f"增加请求次数需要管理员密码（当前{current_requests_per_min}次/分 → 新{new_requests_per_min}次/分）",
-                    )
+                # 增加次数 = 放松限制，需要密码
+                if req.requests_per_minute > current_requests_per_min:
+                    if not req.admin_password:
+                        raise HTTPException(
+                            status_code=403,
+                            detail=f"增加请求次数需要管理员密码（当前{current_requests_per_min}次/分 → 新{req.requests_per_minute}次/分）",
+                        )
 
-                # 验证管理员密码
-                correct_admin_password = await config.get_admin_password()
-                if req.admin_password != correct_admin_password:
-                    raise HTTPException(status_code=403, detail="管理员密码错误")
+                    # 验证管理员密码
+                    correct_admin_password = await config.get_admin_password()
+                    if req.admin_password != correct_admin_password:
+                        raise HTTPException(status_code=403, detail="管理员密码错误")
+
+        # 转换"每分钟次数"为"秒数"（后端存储用）
+        rate_limit_seconds = None
+        if req.status == "rate_limited" and req.requests_per_minute:
+            rate_limit_seconds = round(60 / req.requests_per_minute)
 
         # 调用 set_ip_status（现在返回 tuple）
         success, error_msg = await ip_manager.set_ip_status(
             ip=req.ip,
             status=req.status,
-            rate_limit_seconds=req.rate_limit_seconds,
+            rate_limit_seconds=rate_limit_seconds,
             operator_ip=operator_ip  # 传递操作者IP
         )
 
@@ -2234,9 +2267,8 @@ async def update_ip_status(
             }
             status_name = status_names.get(req.status, req.status)
             message = f"已将 IP {req.ip} 设置为{status_name}"
-            if req.status == "rate_limited" and req.rate_limit_seconds:
-                requests_per_min = round(60 / req.rate_limit_seconds)
-                message += f"（{requests_per_min}次/分钟）"
+            if req.status == "rate_limited" and req.requests_per_minute:
+                message += f"（{req.requests_per_minute}次/分钟）"
             return JSONResponse(content={"success": True, "message": message})
         else:
             # 使用返回的错误信息
