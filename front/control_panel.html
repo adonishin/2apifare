@@ -8449,9 +8449,14 @@ docker run -e GCLI_CREDS_1='{"client_id":"..."}' \
                     const data = await response.json();
 
                     if (response.ok) {
-                        showStatus(data.message, 'success');
+                        // 替换消息中的完整IP为masked IP
+                        const maskedMessage = data.message.replace(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/g, (matchedIP) => maskIP(matchedIP));
+                        showStatus(maskedMessage, 'success');
                         clearCache('ipStats');  // 清除缓存
-                        await refreshIPStats(true);
+                        // 延迟一下再刷新，让两个提示分开显示
+                        setTimeout(async () => {
+                            await refreshIPStats(true);
+                        }, 800);
                     } else {
                         showStatus(`操作失败: ${data.detail || data.error || '未知错误'}`, 'error');
                     }
@@ -8480,9 +8485,14 @@ docker run -e GCLI_CREDS_1='{"client_id":"..."}' \
                 const data = await response.json();
 
                 if (response.ok) {
-                    showStatus(data.message, 'success');
+                    // 替换消息中的完整IP为masked IP
+                    const maskedMessage = data.message.replace(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/g, (matchedIP) => maskIP(matchedIP));
+                    showStatus(maskedMessage, 'success');
                     clearCache('ipStats');  // 清除缓存
-                    await refreshIPStats(true);
+                    // 延迟一下再刷新，让两个提示分开显示
+                    setTimeout(async () => {
+                        await refreshIPStats(true);
+                    }, 800);
                 } else {
                     showStatus(`操作失败: ${data.detail || data.error || '未知错误'}`, 'error');
                 }
@@ -8614,9 +8624,14 @@ docker run -e GCLI_CREDS_1='{"client_id":"..."}' \
                     const data = await response.json();
 
                     if (response.ok) {
-                        showStatus(data.message, 'success');
+                        // 替换消息中的完整IP为masked IP
+                        const maskedMessage = data.message.replace(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/g, (matchedIP) => maskIP(matchedIP));
+                        showStatus(maskedMessage, 'success');
                         clearCache('ipStats');  // 清除缓存
-                        await refreshIPStats(true);
+                        // 延迟一下再刷新，让两个提示分开显示
+                        setTimeout(async () => {
+                            await refreshIPStats(true);
+                        }, 800);
                     } else {
                         showStatus(`操作失败: ${data.detail || data.error || '未知错误'}`, 'error');
                     }
@@ -8653,9 +8668,14 @@ docker run -e GCLI_CREDS_1='{"client_id":"..."}' \
                 const data = await response.json();
 
                 if (response.ok) {
-                    showStatus(data.message, 'success');
+                    // 替换消息中的完整IP为masked IP
+                    const maskedMessage = data.message.replace(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/g, (matchedIP) => maskIP(matchedIP));
+                    showStatus(maskedMessage, 'success');
                     clearCache('ipStats');  // 清除缓存
-                    await refreshIPStats(true);
+                    // 延迟一下再刷新，让两个提示分开显示
+                    setTimeout(async () => {
+                        await refreshIPStats(true);
+                    }, 800);
                 } else {
                     showStatus(`操作失败: ${data.detail || data.error || '未知错误'}`, 'error');
                 }
