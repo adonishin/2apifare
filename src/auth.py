@@ -10,6 +10,7 @@ import socket
 import threading
 import time
 import uuid
+import jwt
 from datetime import timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Optional, Dict, Any, List
@@ -1224,8 +1225,9 @@ def get_auth_status(project_id: str) -> Dict[str, Any]:
     return {"status": "not_found"}
 
 
-# 鉴权功能 - 使用更小的数据结构
-auth_tokens = {}  # 存储有效的认证令牌
+# 鉴权功能 - 使用 JWT 无状态令牌
+JWT_SECRET = "gcli2api-jwt-secret-key-change-in-production"  # 生产环境应从配置文件读取
+JWT_ALGORITHM = "HS256"
 TOKEN_EXPIRY = 3600  # 1小时令牌过期时间
 
 
@@ -1238,51 +1240,51 @@ async def verify_password(password: str) -> bool:
 
 
 def generate_auth_token() -> str:
-    """生成认证令牌"""
-    # 清理过期令牌
-    cleanup_expired_tokens()
-
-    token = secrets.token_urlsafe(32)
-    # 只存储创建时间
-    auth_tokens[token] = time.time()
+    """生成 JWT 认证令牌（无状态）"""
+    payload = {
+        "exp": int(time.time() + TOKEN_EXPIRY),  # 过期时间（UNIX时间戳）
+        "iat": int(time.time()),  # 签发时间（UNIX时间戳）
+        "type": "panel_auth"  # 令牌类型
+    }
+    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    log.debug(f"生成 JWT 令牌，过期时间: {TOKEN_EXPIRY}秒")
     return token
 
 
 def verify_auth_token(token: str) -> bool:
-    """验证认证令牌"""
-    if not token or token not in auth_tokens:
+    """验证 JWT 认证令牌（无状态）"""
+    if not token:
         return False
 
-    created_at = auth_tokens[token]
+    try:
+        # 解码并验证令牌（自动检查过期时间）
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
 
-    # 检查令牌是否过期 (使用更短的过期时间)
-    if time.time() - created_at > TOKEN_EXPIRY:
-        del auth_tokens[token]
+        # 额外验证令牌类型
+        if payload.get("type") != "panel_auth":
+            log.warning("JWT 令牌类型不匹配")
+            return False
+
+        return True
+    except jwt.ExpiredSignatureError:
+        log.debug("JWT 令牌已过期")
         return False
-
-    return True
+    except jwt.InvalidTokenError as e:
+        log.warning(f"JWT 令牌无效: {e}")
+        return False
+    except Exception as e:
+        log.error(f"JWT 验证出错: {e}")
+        return False
 
 
 def cleanup_expired_tokens():
-    """清理过期的认证令牌"""
-    current_time = time.time()
-    expired_tokens = [
-        token
-        for token, created_at in auth_tokens.items()
-        if current_time - created_at > TOKEN_EXPIRY
-    ]
-
-    for token in expired_tokens:
-        del auth_tokens[token]
-
-    if expired_tokens:
-        log.debug(f"清理了 {len(expired_tokens)} 个过期的认证令牌")
+    """清理过期令牌（JWT 无需此功能，保留空实现以保持兼容性）"""
+    pass
 
 
 def invalidate_auth_token(token: str):
-    """使认证令牌失效"""
-    if token in auth_tokens:
-        del auth_tokens[token]
+    """使令牌失效（JWT 无法主动撤销，保留空实现以保持兼容性）"""
+    pass
 
 
 # 文件验证和处理功能 - 使用统一存储系统
