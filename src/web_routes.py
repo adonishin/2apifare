@@ -2186,7 +2186,7 @@ async def update_ip_status(
     - 启用 IP (status=active)：需要管理员密码
     - 封禁 IP (status=banned)：无需密码，但有限制：
       * 目标IP今日请求必须≥80次（保护新用户）
-      * 操作者1小时内最多封禁3次（防止大规模封禁）
+      * 操作者半小时内最多封禁3次（防止大规模封禁）
     - 限速 IP (status=rate_limited)：
       * 默认值：每分钟10次
       * 范围：1-60次/分钟
