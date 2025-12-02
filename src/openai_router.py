@@ -167,11 +167,16 @@ async def chat_completions(request: Request, token: str = Depends(authenticate))
         ip_manager = await get_ip_manager()
 
         # 仅检查 IP 是否被封禁或限速（不记录请求）
-        allowed = await ip_manager.check_ip_allowed(ip=client_ip)
+        allowed, reject_reason = await ip_manager.check_ip_allowed(ip=client_ip)
 
         if not allowed:
-            log.warning(f"Blocked request from IP: {client_ip}")
-            raise HTTPException(status_code=403, detail="您的 IP 已被封禁或限速，请稍后再试")
+            log.warning(f"Blocked request from IP: {client_ip}, reason: {reject_reason}")
+            if reject_reason == "banned":
+                raise HTTPException(status_code=403, detail="禁止访问，请翻译具体报错信息查看原因，或联系服务商询问被禁止原因")
+            elif reject_reason == "rate_limited":
+                raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试")
+            else:
+                raise HTTPException(status_code=403, detail="访问被拒绝")
 
     except HTTPException:
         raise

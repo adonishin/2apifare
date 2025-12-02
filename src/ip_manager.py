@@ -299,13 +299,16 @@ class IPManager:
             ip: IP 地址
 
         Returns:
-            是否允许请求（False表示IP被封禁或限速中）
+            tuple: (是否允许, 拒绝原因)
+            - (True, None) 表示允许访问
+            - (False, "banned") 表示被封禁
+            - (False, "rate_limited") 表示被限速
         """
         self._ensure_initialized()
 
         async with self._cache_lock:
             if "ips" not in self._ip_cache:
-                return True  # 如果没有 IP 数据，允许访问
+                return True, None  # 如果没有 IP 数据，允许访问
 
             # 检查 IP 是否被封禁
             if ip in self._ip_cache["ips"]:
@@ -322,7 +325,7 @@ class IPManager:
                         log.info(f"Auto-unbanned IP {ip} after 24 hours")
                     else:
                         log.warning(f"Blocked request from banned IP: {ip}")
-                        return False
+                        return False, "banned"
 
                 # 检查限速
                 if ip_data.get("status") == "rate_limited":
@@ -330,9 +333,9 @@ class IPManager:
                     rate_limit = ip_data.get("rate_limit_seconds", 6)  # 默认6秒 = 每分钟10次
                     if time.time() - last_request < rate_limit:
                         log.warning(f"Rate limited IP: {ip}")
-                        return False
+                        return False, "rate_limited"
 
-            return True
+            return True, None
 
     async def record_request(
         self,
@@ -533,19 +536,37 @@ class IPManager:
             ip: 指定 IP，如果为 None 则返回所有 IP
 
         Returns:
-            IP 统计数据
+            IP 统计数据（today_requests会根据today_date校正）
         """
         self._ensure_initialized()
 
+        # 获取今天的日期（UTC+8）
+        china_tz = timezone(timedelta(hours=8))
+        today_date = datetime.now(china_tz).strftime("%Y-%m-%d")
+
+        def _correct_today_requests(ip_data: Dict) -> Dict:
+            """校正today_requests：如果today_date不是今天，返回0"""
+            if not ip_data:
+                return ip_data
+            corrected = ip_data.copy()
+            if corrected.get("today_date") != today_date:
+                corrected["today_requests"] = 0
+                corrected["models_used"] = {}  # 模型使用也应该清零
+            return corrected
+
         async with self._cache_lock:
             if ip:
-                return self._ip_cache.get("ips", {}).get(ip, {})
+                return _correct_today_requests(self._ip_cache.get("ips", {}).get(ip, {}))
             else:
-                # 返回所有 IP，按请求次数排序
+                # 返回所有 IP，按请求次数排序，并校正today_requests
                 all_ips = self._ip_cache.get("ips", {})
+                corrected_ips = {
+                    ip_addr: _correct_today_requests(ip_data) 
+                    for ip_addr, ip_data in all_ips.items()
+                }
                 sorted_ips = dict(
                     sorted(
-                        all_ips.items(),
+                        corrected_ips.items(),
                         key=lambda x: x[1].get("total_requests", 0),
                         reverse=True,
                     )
@@ -646,6 +667,17 @@ class IPManager:
             今日累计积分
         """
         try:
+            # 获取今天的日期（UTC+8）
+            china_tz = timezone(timedelta(hours=8))
+            today_date = datetime.now(china_tz).strftime("%Y-%m-%d")
+
+            # 获取IP的数据
+            ip_data = self._ip_cache.get("ips", {}).get(ip, {})
+            
+            # 检查today_date是否是今天，不是今天则返回0
+            if ip_data.get("today_date") != today_date:
+                return 0.0
+
             # 读取模型积分配置
             import toml
             import os
@@ -657,13 +689,12 @@ class IPManager:
             if not os.path.exists(credits_toml_file):
                 log.warning(f"Model credits file not found: {credits_toml_file}")
                 # 如果文件不存在，使用默认积分估算
-                return self._ip_cache.get("ips", {}).get(ip, {}).get("today_requests", 0) * self._default_credit_score
+                return ip_data.get("today_requests", 0) * self._default_credit_score
 
             with open(credits_toml_file, "r", encoding="utf-8") as f:
                 credits_data = toml.load(f)
 
             # 获取IP的models_used
-            ip_data = self._ip_cache.get("ips", {}).get(ip, {})
             models_used = ip_data.get("models_used", {})
 
             if not models_used:
@@ -701,8 +732,13 @@ class IPManager:
 
         except Exception as e:
             log.error(f"Error calculating IP credits: {e}")
-            # 出错时使用默认积分作为后备
-            return self._ip_cache.get("ips", {}).get(ip, {}).get("today_requests", 0) * self._default_credit_score
+            # 出错时使用默认积分作为后备（也需要检查today_date）
+            ip_data = self._ip_cache.get("ips", {}).get(ip, {})
+            china_tz = timezone(timedelta(hours=8))
+            today_date = datetime.now(china_tz).strftime("%Y-%m-%d")
+            if ip_data.get("today_date") != today_date:
+                return 0.0
+            return ip_data.get("today_requests", 0) * self._default_credit_score
 
     async def _check_ban_operation_limit(self, operator_ip: str) -> tuple[bool, str]:
         """
@@ -714,7 +750,7 @@ class IPManager:
         Returns:
             (是否允许, 错误信息)
         """
-        max_bans = 3  # 最多3次封禁操作
+        max_bans = 5  # 最多5次封禁操作
         time_window = 1800  # 半小时 = 1800秒
 
         try:
@@ -770,13 +806,21 @@ class IPManager:
 
             # 封禁操作的额外检查
             if status == "banned":
-                # 检查1：今日积分少于60不能被封禁（保护新用户体验，避免高端模型一刀切）
+                # 检查1：今日积分少于50不能被封禁（保护新用户体验，避免高端模型一刀切）
                 if ip in self._ip_cache["ips"]:
                     today_credits = await self._calculate_ip_credits(ip)
-                    if today_credits < 60:
-                        today_requests = self._ip_cache["ips"][ip].get("today_requests", 0)
-                        log.warning(f"Cannot ban IP {ip}: only {today_credits:.2f} credits today (minimum 60, {today_requests} requests)")
-                        return False, f"今日积分仅 {today_credits:.1f}，少于60积分不能封禁（已使用{today_requests}次请求，保护每位用户体验）"
+                    if today_credits < 50:
+                        # 获取今天的日期（UTC+8）检查today_requests
+                        china_tz = timezone(timedelta(hours=8))
+                        today_date = datetime.now(china_tz).strftime("%Y-%m-%d")
+                        ip_data = self._ip_cache["ips"][ip]
+                        today_requests = (
+                            ip_data.get("today_requests", 0) 
+                            if ip_data.get("today_date") == today_date 
+                            else 0
+                        )
+                        log.warning(f"Cannot ban IP {ip}: only {today_credits:.2f} credits today (minimum 50, {today_requests} requests)")
+                        return False, f"今日积分仅 {today_credits:.1f}，少于50积分不能封禁（已使用{today_requests}次请求，保护每位用户体验）"
 
                 # 检查2：操作者封禁频率限制
                 if operator_ip:
@@ -820,6 +864,10 @@ class IPManager:
         async with self._cache_lock:
             all_ips = self._ip_cache.get("ips", {})
 
+            # 获取今天的日期（UTC+8）
+            china_tz = timezone(timedelta(hours=8))
+            today_date = datetime.now(china_tz).strftime("%Y-%m-%d")
+
             total_ips = len(all_ips)
             active_ips = sum(1 for ip_data in all_ips.values() if ip_data.get("status") == "active")
             banned_ips = sum(1 for ip_data in all_ips.values() if ip_data.get("status") == "banned")
@@ -827,7 +875,12 @@ class IPManager:
                 1 for ip_data in all_ips.values() if ip_data.get("status") == "rate_limited"
             )
             total_requests = sum(ip_data.get("total_requests", 0) for ip_data in all_ips.values())
-            today_requests = sum(ip_data.get("today_requests", 0) for ip_data in all_ips.values())
+            # 只统计今天的请求（检查today_date是否是今天）
+            today_requests = sum(
+                ip_data.get("today_requests", 0) 
+                for ip_data in all_ips.values() 
+                if ip_data.get("today_date") == today_date
+            )
 
             return {
                 "total_ips": total_ips,
@@ -835,7 +888,7 @@ class IPManager:
                 "banned_ips": banned_ips,
                 "rate_limited_ips": rate_limited_ips,
                 "total_requests": total_requests,
-                "today_requests": today_requests,  # 新增：今日总请求
+                "today_requests": today_requests,  # 只统计真正的今日请求
             }
 
     async def get_ip_ranking(
@@ -870,6 +923,10 @@ class IPManager:
         async with self._cache_lock:
             all_ips = self._ip_cache.get("ips", {})
 
+            # 获取今天的日期（UTC+8）
+            china_tz = timezone(timedelta(hours=8))
+            today_date = datetime.now(china_tz).strftime("%Y-%m-%d")
+
             # 过滤IP
             filtered_ips = []
             for ip, ip_data in all_ips.items():
@@ -877,9 +934,16 @@ class IPManager:
                 if not include_banned and ip_data.get("status") == "banned":
                     continue
 
+                # 检查today_date是否是今天，不是今天则today_requests为0
+                actual_today_requests = (
+                    ip_data.get("today_requests", 0) 
+                    if ip_data.get("today_date") == today_date 
+                    else 0
+                )
+
                 filtered_ips.append({
                     "ip": ip,
-                    "today_requests": ip_data.get("today_requests", 0),
+                    "today_requests": actual_today_requests,
                     "total_requests": ip_data.get("total_requests", 0),
                     "status": ip_data.get("status", "active"),
                     "location": ip_data.get("location", "未知"),
