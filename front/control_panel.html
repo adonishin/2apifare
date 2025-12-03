@@ -7953,12 +7953,13 @@ docker run -e GCLI_CREDS_1='{"client_id":"..."}' \
                 }
             }
 
-            // GeminiCLI - 分为4个独立组
+            // GeminiCLI - 分为5个独立组
             if (data.geminicli && Object.keys(data.geminicli).length > 0) {
                 const gemini3ProModels = [];   // Gemini 3 Pro Preview 系列
                 const proStandardModels = [];  // 标准 2.5-pro（不含 preview-06-05）
                 const proPreviewModels = [];   // preview-06-05 系列
-                const flashModels = [];        // flash 系列
+                const flashModels = [];        // flash 系列（不含 lite）
+                const flashLiteModels = [];    // flash-lite 系列
 
                 for (const [name, score] of Object.entries(data.geminicli)) {
                     const model = { name, score, desc: getModelDescription(name) };
@@ -7969,6 +7970,8 @@ docker run -e GCLI_CREDS_1='{"client_id":"..."}' \
                         proPreviewModels.push(model);
                     } else if (name.includes('pro')) {
                         proStandardModels.push(model);
+                    } else if (name.includes('flash-lite')) {
+                        flashLiteModels.push(model);
                     } else if (name.includes('flash')) {
                         flashModels.push(model);
                     }
@@ -8054,6 +8057,27 @@ docker run -e GCLI_CREDS_1='{"client_id":"..."}' \
                             <div class="row-score">${model.score.toFixed(2)}</div>
                         </div>`;
                     }
+
+                    html += '<br>';
+                }
+
+                // 第五排：Flash Lite 系列（最低成本）
+                if (flashLiteModels.length > 0) {
+                    flashLiteModels.sort((a, b) => b.score - a.score);
+                    html += `<div class="group-header" data-tier="7">
+                        <span>GEMINICLI / FLASH LITE SERIES</span>
+                        <span>TIER 7</span>
+                    </div>`;
+
+                    for (const model of flashLiteModels) {
+                        html += `<div class="model-row">
+                            <div class="row-info">
+                                <span class="row-name">${model.name}</span>
+                                <span class="row-desc">${model.desc}</span>
+                            </div>
+                            <div class="row-score">${model.score.toFixed(2)}</div>
+                        </div>`;
+                    }
                 }
             }
 
@@ -8096,10 +8120,16 @@ docker run -e GCLI_CREDS_1='{"client_id":"..."}' \
             if (name.includes('2.5-pro') && !name.includes('search') && !name.includes('thinking') && !name.includes('preview')) return 'Best Value · Standard Pro';
 
             // GeminiCLI Flash
-            if (name.includes('2.5-flash-search')) return 'Fast RAG · Low Latency';
-            if (name.includes('2.5-flash-maxthinking')) return 'Flash Reasoning · Efficient';
-            if (name.includes('2.5-flash-nothinking')) return 'Instant Response · Raw Output';
-            if (name.includes('2.5-flash') && !name.includes('search') && !name.includes('thinking')) return 'High Throughput Base';
+            if (name.includes('2.5-flash-search') && !name.includes('lite')) return 'Fast RAG · Low Latency';
+            if (name.includes('2.5-flash-maxthinking') && !name.includes('lite')) return 'Flash Reasoning · Efficient';
+            if (name.includes('2.5-flash-nothinking') && !name.includes('lite')) return 'Instant Response · Raw Output';
+            if (name.includes('2.5-flash') && !name.includes('search') && !name.includes('thinking') && !name.includes('lite')) return 'High Throughput Base';
+
+            // GeminiCLI Flash Lite（最低成本）
+            if (name.includes('flash-lite-search')) return 'Lite RAG · Minimal Cost';
+            if (name.includes('flash-lite-maxthinking')) return 'Lite Reasoning · Budget';
+            if (name.includes('flash-lite-nothinking')) return 'Lite Instant · Ultra Fast';
+            if (name.includes('flash-lite')) return 'Ultra Low Cost · Basic Tasks';
 
             return 'General Purpose Model';
         }
