@@ -777,8 +777,8 @@ async def handle_antigravity_request(request_data: ChatCompletionRequest):
                         should_retry = await _check_should_retry_antigravity(error_code, auto_ban_error_codes)
 
                         if should_retry and attempt < max_retries - 1:
-                            # 指数退避：base_delay * 2^attempt (0.5s, 1s, 2s, 4s...)
-                            base_delay = 0.5
+                            # 指数退避：base_delay * 2^attempt (1.5s, 3s, 6s, 12s...)
+                            base_delay = 1.5
                             delay = base_delay * (2 ** attempt)
                             # 403/401 等错误：切换凭证并重试
                             log.warning(f"[RETRY] {error_code} error encountered, waiting {delay:.1f}s before retry ({attempt + 1}/{max_retries})")
