@@ -292,6 +292,35 @@ class CredentialManager:
             await self._rotate_credential()
             log.info("Forced credential rotation due to rate limit")
 
+    async def force_refresh_current_token(self) -> bool:
+        """
+        强制刷新当前凭证的 token（用于 401/400 错误处理）
+
+        Returns:
+            bool: True 表示刷新成功，False 表示刷新失败
+        """
+        async with self._operation_lock:
+            if not self._current_credential_file or not self._current_credential_data:
+                log.warning("[AUTH REFRESH] No current credential to refresh")
+                return False
+
+            log.info(f"[AUTH REFRESH] Force refreshing token for: {self._current_credential_file}")
+
+            # 尝试刷新 token
+            refreshed_data = await self._refresh_token(
+                self._current_credential_data,
+                self._current_credential_file
+            )
+
+            if refreshed_data:
+                # 更新缓存的凭证数据
+                self._current_credential_data = refreshed_data
+                log.info(f"[AUTH REFRESH] Token refreshed successfully: {self._current_credential_file}")
+                return True
+            else:
+                log.warning(f"[AUTH REFRESH] Token refresh failed: {self._current_credential_file}")
+                return False
+
     def increment_call_count(self):
         """增加调用计数"""
         self._call_count += 1

@@ -376,7 +376,29 @@ async def send_gemini_request(
                         should_auto_ban = await _check_should_auto_ban(resp.status_code)
 
                         if should_auto_ban and credential_manager and attempt < max_retries:
-                            # 403/401等错误：封禁当前凭证并切换到下一个凭证重试
+                            # 401/400 错误：先尝试刷新 token
+                            if resp.status_code in (400, 401):
+                                log.warning(
+                                    f"[AUTH REFRESH] {resp.status_code} error, attempting token refresh before retry ({attempt + 1}/{max_retries})"
+                                )
+                                refresh_success = await credential_manager.force_refresh_current_token()
+
+                                if refresh_success:
+                                    # Token 刷新成功，使用同一凭证重试
+                                    log.info("[AUTH REFRESH] Token refreshed, retrying with same credential")
+                                    # 重新准备请求头（使用刷新后的 token）
+                                    next_cred_result = await _get_next_credential(
+                                        credential_manager, payload, use_public_api, target_url
+                                    )
+                                    if next_cred_result:
+                                        current_file, credential_data, headers, final_post_data, target_url = next_cred_result
+                                    await asyncio.sleep(0.5)
+                                    continue  # 重试
+
+                                # Token 刷新失败，继续走封禁流程
+                                log.warning("[AUTH REFRESH] Token refresh failed, proceeding with credential ban")
+
+                            # 403 或 token 刷新失败：封禁当前凭证并切换到下一个凭证重试
                             log.warning(
                                 f"[RETRY] {resp.status_code} error encountered, rotating credential and retrying ({attempt + 1}/{max_retries})"
                             )
@@ -481,7 +503,30 @@ async def send_gemini_request(
                                     await credential_manager.record_api_call_result(
                                         current_file, False, resp.status_code
                                     )
-                                # 403/401等错误：封禁当前凭证并切换到下一个凭证重试
+
+                                # 401/400 错误：先尝试刷新 token
+                                if resp.status_code in (400, 401):
+                                    log.warning(
+                                        f"[AUTH REFRESH] {resp.status_code} error, attempting token refresh before retry ({attempt + 1}/{max_retries})"
+                                    )
+                                    refresh_success = await credential_manager.force_refresh_current_token()
+
+                                    if refresh_success:
+                                        # Token 刷新成功，使用同一凭证重试
+                                        log.info("[AUTH REFRESH] Token refreshed, retrying with same credential")
+                                        # 重新准备请求头（使用刷新后的 token）
+                                        next_cred_result = await _get_next_credential(
+                                            credential_manager, payload, use_public_api, target_url
+                                        )
+                                        if next_cred_result:
+                                            current_file, credential_data, headers, final_post_data, target_url = next_cred_result
+                                        await asyncio.sleep(0.5)
+                                        continue  # 重试
+
+                                    # Token 刷新失败，继续走封禁流程
+                                    log.warning("[AUTH REFRESH] Token refresh failed, proceeding with credential ban")
+
+                                # 403 或 token 刷新失败：封禁当前凭证并切换到下一个凭证重试
                                 log.warning(
                                     f"[RETRY] {resp.status_code} error encountered, rotating credential and retrying ({attempt + 1}/{max_retries})"
                                 )
