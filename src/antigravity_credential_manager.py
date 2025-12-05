@@ -467,12 +467,13 @@ class AntigravityCredentialManager:
         except Exception as e:
             log.error(f"Error saving account to storage: {e}")
 
-    async def get_valid_credential(self, model_name: str = None) -> Optional[Dict[str, Any]]:
+    async def get_valid_credential(self, model_name: str = None, _checked_count: int = 0) -> Optional[Dict[str, Any]]:
         """
         获取有效的凭证，自动处理轮换和失效凭证切换
 
         Args:
             model_name: 模型名称（用于配额检查和系列封禁检查）
+            _checked_count: 内部参数，已检查的账号数量（防止死循环）
 
         Returns:
             Dict with 'account' and 'virtual_filename' keys, or None if no valid credential
@@ -482,6 +483,11 @@ class AntigravityCredentialManager:
                 await self._discover_credentials()
                 if not self._credential_accounts:
                     return None
+
+            # [FIX] 防止死循环：如果已检查账号数超过总账号数，说明所有账号都不可用
+            if _checked_count >= len(self._credential_accounts):
+                log.error(f"All {len(self._credential_accounts)} Antigravity accounts checked, none available for model {model_name}")
+                return None
 
             # 检查是否需要轮换（基于调用次数）
             if await self._should_rotate():
@@ -498,12 +504,12 @@ class AntigravityCredentialManager:
                 if is_banned:
                     # 系列被封禁，切换到下一个账号
                     if len(self._credential_accounts) > 1:
-                        log.info("Rotating to next account due to series ban")
+                        log.info(f"Rotating to next account due to series ban (checked {_checked_count + 1}/{len(self._credential_accounts)})")
                         await self._rotate_credential()
                         await self._load_current_credential()
 
-                        # 递归调用检查新账号
-                        return await self.get_valid_credential(model_name)
+                        # 递归调用检查新账号，增加检查计数
+                        return await self.get_valid_credential(model_name, _checked_count + 1)
                     else:
                         log.error("Only one account available and series is banned")
                         return None
@@ -533,8 +539,8 @@ class AntigravityCredentialManager:
                         await self._load_current_credential()
 
                         if self._current_credential_account:
-                            # 递归调用以确保新账号也是有效的
-                            return await self.get_valid_credential(model_name)
+                            # 递归调用以确保新账号也是有效的，增加检查计数
+                            return await self.get_valid_credential(model_name, _checked_count + 1)
                         else:
                             return None
 
