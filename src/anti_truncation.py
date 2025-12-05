@@ -422,6 +422,14 @@ class AntiTruncationStreamProcessor:
 
             response_data = json.loads(content)
 
+            # [FIX] 检查是否为错误响应，错误响应不应该触发续传
+            # 避免将 404/429/403 等 API 错误误判为"内容被截断"
+            if "error" in response_data:
+                log.debug(
+                    f"Anti-truncation: Error response detected (code: {response_data.get('error', {}).get('code', 'unknown')}), skipping continuation"
+                )
+                return content.encode()
+
             # 检查是否包含done标记
             text_content = self._extract_content_from_response(response_data)
             has_done_marker = self._check_done_marker_in_text(text_content)

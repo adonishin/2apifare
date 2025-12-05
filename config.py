@@ -9,8 +9,11 @@ from typing import Any, Optional
 # Client Configuration
 
 # 需要自动封禁的错误码 (默认值，可通过环境变量或配置覆盖)
-# 404: 模型不存在或账号无权限访问该模型
-AUTO_BAN_ERROR_CODES = [401, 403, 404]
+# 401: 未授权
+# 403: 无权限（永久性错误）
+# 404: 模型不存在或 Token 过期
+# 429: 配额耗尽（避免在耗尽的账号间反复轮换，等待配额重置）
+AUTO_BAN_ERROR_CODES = [401, 403, 404, 429]
 
 # Default Safety Settings for Google API
 # 包含所有已知的安全分类，确保内容不被过滤

@@ -77,17 +77,8 @@ async def _handle_api_error(
     current_credential_file: str = None
 ):
     """Handle API errors by rotating credentials when needed. Error recording should be done before calling this function."""
-    if status_code == 429 and credential_manager:
-        if response_content:
-            log.error(
-                f"Google API returned status 429 - quota exhausted. Response details: {response_content[:500]}"
-            )
-        else:
-            log.error("Google API returned status 429 - quota exhausted, switching credentials")
-        await credential_manager.force_rotate_credential()
-
-    # 处理自动封禁的错误码（403, 401等永久性错误）
-    elif (
+    # 处理自动封禁的错误码（401, 403, 404, 429 等错误）
+    if (
         await get_auto_ban_enabled()
         and status_code in await get_auto_ban_error_codes()
         and credential_manager
