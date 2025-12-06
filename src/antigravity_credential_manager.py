@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from urllib.parse import urlencode
 from datetime import datetime, timezone, timedelta
 
-from config import get_calls_per_rotation, get_credentials_dir, get_antigravity_skip_project_verification
+from config import get_calls_per_rotation, get_credentials_dir, get_antigravity_skip_project_verification, get_antigravity_oauth_endpoint, get_antigravity_api_endpoint
 from log import log
 from .storage_adapter import get_storage_adapter
 from antigravity.converter import generate_project_id
@@ -124,10 +124,11 @@ def _identify_model_series(model_name: str) -> Optional[str]:
     识别模型所属系列
 
     Args:
-        model_name: 模型名称（例如 "gemini-3-pro-high", "claude-sonnet-4-5"）
+        model_name: 模型名称（例如 "gemini-3-pro-high", "claude-sonnet-4-5", "gemini-2.5-pro"）
 
     Returns:
-        "claude_series" 或 "gemini_3_series"，如果无法识别返回 None
+        "claude_series", "gemini_3_series", "gemini_2_series" 或 "gemini_series"
+        如果无法识别返回 None
     """
     if not model_name:
         return None
@@ -141,6 +142,18 @@ def _identify_model_series(model_name: str) -> Optional[str]:
     # Gemini 3 系列
     if 'gemini-3' in model_lower or 'gemini3' in model_lower:
         return 'gemini_3_series'
+
+    # Gemini 2.5 系列
+    if 'gemini-2.5' in model_lower or 'gemini2.5' in model_lower:
+        return 'gemini_2_5_series'
+
+    # Gemini 2 系列
+    if 'gemini-2' in model_lower or 'gemini2' in model_lower:
+        return 'gemini_2_series'
+
+    # 通用 Gemini 系列（兜底）
+    if 'gemini' in model_lower:
+        return 'gemini_series'
 
     return None
 
@@ -379,10 +392,14 @@ class AntigravityCredentialManager:
                 "refresh_token": refresh_token
             }
 
+            # 获取配置的 OAuth 端点（支持代理）
+            oauth_endpoint = await get_antigravity_oauth_endpoint()
+            log.debug(f"Using OAuth endpoint: {oauth_endpoint}")
+
             # 发送刷新请求
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.post(
-                    "https://oauth2.googleapis.com/token",
+                    oauth_endpoint,
                     headers={
                         "Host": "oauth2.googleapis.com",
                         "User-Agent": "Go-http-client/1.1",
@@ -423,6 +440,10 @@ class AntigravityCredentialManager:
     async def _save_account_to_storage(self, account: Dict[str, Any]):
         """
         将更新后的账号信息保存到 accounts.toml
+        
+        支持保存的字段：
+        - access_token, expires_in, timestamp（token 刷新）
+        - project_id, has_antigravity_access（projectId 验证）
 
         Args:
             account: 账号数据字典
@@ -440,30 +461,45 @@ class AntigravityCredentialManager:
                 log.error("Failed to load accounts.toml for saving")
                 return
 
-            # 查找并更新对应的账号
+            # 查找并更新对应的账号（优先使用 user_id，其次使用 email）
             user_id = account.get("user_id")
+            email = account.get("email")
             found = False
 
             for i, existing_account in enumerate(accounts_data["accounts"]):
-                if existing_account.get("user_id") == user_id:
+                # 匹配条件：user_id 或 email
+                if (user_id and existing_account.get("user_id") == user_id) or \
+                   (email and existing_account.get("email") == email):
                     # 更新账号信息（保留其他字段）
-                    accounts_data["accounts"][i].update({
-                        "access_token": account["access_token"],
-                        "expires_in": account["expires_in"],
-                        "timestamp": account["timestamp"],
-                        "last_used": time.strftime("%Y-%m-%d %H:%M:%S")
-                    })
+                    update_fields = {}
+                    
+                    # Token 刷新相关字段
+                    if "access_token" in account:
+                        update_fields["access_token"] = account["access_token"]
+                    if "expires_in" in account:
+                        update_fields["expires_in"] = account["expires_in"]
+                    if "timestamp" in account:
+                        update_fields["timestamp"] = account["timestamp"]
+                        update_fields["last_used"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                    
+                    # ProjectId 相关字段
+                    if "project_id" in account:
+                        update_fields["project_id"] = account["project_id"]
+                    if "has_antigravity_access" in account:
+                        update_fields["has_antigravity_access"] = account["has_antigravity_access"]
+                    
+                    accounts_data["accounts"][i].update(update_fields)
                     found = True
                     break
 
             if not found:
-                log.warning(f"Account with user_id {user_id} not found in accounts.toml")
+                log.warning(f"Account not found in accounts.toml (user_id={user_id}, email={email})")
                 return
 
             # 保存回 accounts.toml
             await self._storage_adapter.save_antigravity_accounts(accounts_data)
 
-            log.debug(f"Saved updated token to accounts.toml for user_id: {user_id}")
+            log.debug(f"Saved account data to accounts.toml: user_id={user_id}, email={email}")
 
         except Exception as e:
             log.error(f"Error saving account to storage: {e}")
@@ -621,51 +657,52 @@ class AntigravityCredentialManager:
             # 解析 429 错误详情
             error_details = _parse_429_error_details(error_message)
 
-            if not error_details:
-                log.warning(f"[429] Failed to parse error details, applying default 6-hour ban")
-                # 如果解析失败，默认封禁 6 小时
-                ban_until = datetime.now(timezone.utc) + timedelta(hours=6)
-                await self._set_series_ban(virtual_filename, "gemini_3_series", ban_until)
-                return
+            # 计算封禁时间
+            ban_duration_seconds = 6 * 3600  # 默认 6 小时
 
-            # 提取模型和延迟信息
-            model_name = error_details.get('model', '')
-            delay_seconds = error_details.get('quota_reset_delay_seconds', 0)
-            reset_timestamp_str = error_details.get('quota_reset_timestamp')
+            if error_details:
+                delay_seconds = error_details.get('quota_reset_delay_seconds', 0)
+                reset_timestamp_str = error_details.get('quota_reset_timestamp')
 
-            # 识别模型系列
-            series = _identify_model_series(model_name)
-            if not series:
-                log.warning(f"[429] Could not identify series for model: {model_name}, skipping ban")
-                return
-
-            # 计算封禁时间（API 返回时间 × 2，如果没有返回则默认 6 小时）
-            if reset_timestamp_str:
-                # 使用 quotaResetTimeStamp
-                reset_time = datetime.fromisoformat(reset_timestamp_str.replace('Z', '+00:00'))
-                now = datetime.now(timezone.utc)
-                api_duration = (reset_time - now).total_seconds()
-
-                # 封禁时间 = API 时间 × 2
-                ban_duration_seconds = max(api_duration * 2, 3600)  # 至少 1 小时
-            elif delay_seconds > 0:
-                # 使用 quotaResetDelay
-                ban_duration_seconds = delay_seconds * 2
-            else:
-                # 默认 6 小时
-                ban_duration_seconds = 6 * 3600
+                if reset_timestamp_str:
+                    # 使用 quotaResetTimeStamp
+                    try:
+                        reset_time = datetime.fromisoformat(reset_timestamp_str.replace('Z', '+00:00'))
+                        now = datetime.now(timezone.utc)
+                        api_duration = (reset_time - now).total_seconds()
+                        # 封禁时间 = API 时间 × 2
+                        ban_duration_seconds = max(api_duration * 2, 3600)  # 至少 1 小时
+                    except Exception:
+                        pass
+                elif delay_seconds > 0:
+                    # 使用 quotaResetDelay
+                    ban_duration_seconds = delay_seconds * 2
 
             ban_until = datetime.now(timezone.utc) + timedelta(seconds=ban_duration_seconds)
-
-            # 设置系列封禁
-            await self._set_series_ban(virtual_filename, series, ban_until)
-
-            # 输出友好日志
             hours = ban_duration_seconds / 3600
-            log.warning(
-                f"[429 BAN] Account {virtual_filename}: {series} banned until {ban_until.isoformat()} "
-                f"(~{hours:.1f} hours) - Model: {model_name}"
-            )
+
+            # 提取模型名称并识别系列
+            model_name = error_details.get('model', '') if error_details else ''
+            series = _identify_model_series(model_name)
+
+            if series:
+                # 有明确的模型系列，只封禁该系列
+                await self._set_series_ban(virtual_filename, series, ban_until)
+                log.warning(
+                    f"[429 BAN] Account {virtual_filename}: {series} banned until {ban_until.isoformat()} "
+                    f"(~{hours:.1f} hours) - Model: {model_name}"
+                )
+            else:
+                # 无法识别模型系列（如 "Chat API requests" 配额错误）
+                # 封禁所有常见系列
+                log.warning(f"[429] Could not identify series for model: '{model_name}', applying global ban")
+                all_series = ['gemini_series', 'gemini_2_series', 'gemini_2_5_series', 'gemini_3_series', 'claude_series']
+                for s in all_series:
+                    await self._set_series_ban(virtual_filename, s, ban_until)
+                log.warning(
+                    f"[429 BAN] Account {virtual_filename}: ALL SERIES banned until {ban_until.isoformat()} "
+                    f"(~{hours:.1f} hours) - Reason: Global quota exceeded"
+                )
 
         except Exception as e:
             log.error(f"Error handling 429 series ban: {e}")
@@ -689,19 +726,31 @@ class AntigravityCredentialManager:
 
             # 提取 user_id
             user_id = virtual_filename.replace("userID_", "")
+            field_name = f"{series}_banned_until"
+            ban_until_str = ban_until.isoformat()
 
-            # 查找并更新对应账号
+            # 查找并更新对应账号（文件）
             for i, account in enumerate(accounts_data["accounts"]):
                 if account.get("user_id") == user_id:
                     # 设置系列封禁时间戳（ISO 格式）
-                    field_name = f"{series}_banned_until"
-                    accounts_data["accounts"][i][field_name] = ban_until.isoformat()
+                    accounts_data["accounts"][i][field_name] = ban_until_str
                     break
 
             # 保存回 accounts.toml
             await self._storage_adapter.save_antigravity_accounts(accounts_data)
 
-            log.debug(f"Set {series} ban for {virtual_filename} until {ban_until.isoformat()}")
+            # [CRITICAL FIX] 同时更新内存中的账号数据，确保封禁立即生效
+            for cred_entry in self._credential_accounts:
+                if cred_entry.get("virtual_filename") == virtual_filename:
+                    cred_entry["account"][field_name] = ban_until_str
+                    log.info(f"[429 BAN] Updated in-memory ban for {virtual_filename}: {field_name} = {ban_until_str}")
+                    break
+
+            # 同时更新当前凭证（如果是当前凭证被封禁）
+            if self._current_credential_account and self._current_credential_account.get("user_id") == user_id:
+                self._current_credential_account[field_name] = ban_until_str
+
+            log.debug(f"Set {series} ban for {virtual_filename} until {ban_until_str}")
 
         except Exception as e:
             log.error(f"Error setting series ban: {e}")
@@ -841,10 +890,27 @@ class AntigravityCredentialManager:
             projectId 或 None（如果账号无资格）
         """
         try:
+            # 从配置的 API 端点构建 loadCodeAssist URL
+            # 例如: https://ant00.0vv0.tech/daily/v1internal:streamGenerateContent?alt=sse
+            #    -> https://ant00.0vv0.tech/daily/v1internal:loadCodeAssist
+            api_endpoint = await get_antigravity_api_endpoint()
+            
+            # 提取基础 URL（去掉 :streamGenerateContent?alt=sse 部分）
+            if ':streamGenerateContent' in api_endpoint:
+                base_url = api_endpoint.split(':streamGenerateContent')[0]
+            elif '/v1internal' in api_endpoint:
+                base_url = api_endpoint.split('/v1internal')[0] + '/v1internal'
+            else:
+                # 降级到默认 URL
+                base_url = 'https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal'
+            
+            load_code_assist_url = f"{base_url}:loadCodeAssist"
+            log.debug(f"Using loadCodeAssist endpoint: {load_code_assist_url}")
+
             # 调用 loadCodeAssist API
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
-                    'https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:loadCodeAssist',
+                    load_code_assist_url,
                     headers={
                         'Host': 'daily-cloudcode-pa.sandbox.googleapis.com',
                         'User-Agent': 'antigravity/1.11.9 windows/amd64',
@@ -875,54 +941,6 @@ class AntigravityCredentialManager:
         except Exception as e:
             log.error(f"Error fetching projectId: {e}")
             raise
-
-    async def _save_account_to_storage(self, account: Dict[str, Any]) -> None:
-        """
-        保存账号数据到存储
-
-        Args:
-            account: 账号数据字典
-        """
-        try:
-            virtual_filename = None
-
-            # 查找对应的 virtual_filename
-            for acc in self._credential_accounts:
-                if acc.get('account', {}).get('email') == account.get('email'):
-                    virtual_filename = acc.get('virtual_filename')
-                    break
-
-            if not virtual_filename:
-                log.error(f"Cannot find virtual_filename for account {account.get('email')}")
-                return
-
-            # 读取现有 accounts.toml
-            accounts_data = await self._storage_adapter.load_antigravity_accounts()
-
-            if not accounts_data or "accounts" not in accounts_data:
-                log.error("Cannot load accounts.toml")
-                return
-
-            # 更新账号数据
-            updated = False
-            for i, acc in enumerate(accounts_data["accounts"]):
-                if acc.get("email") == account.get("email"):
-                    # 更新 project_id 和其他字段
-                    accounts_data["accounts"][i]["project_id"] = account.get("project_id")
-                    if "has_antigravity_access" in account:
-                        accounts_data["accounts"][i]["has_antigravity_access"] = account.get("has_antigravity_access")
-                    updated = True
-                    break
-
-            if updated:
-                # 保存回存储
-                await self._storage_adapter.save_antigravity_accounts(accounts_data)
-                log.debug(f"Account data saved: {account.get('email')}")
-            else:
-                log.warning(f"Account {account.get('email')} not found in accounts.toml")
-
-        except Exception as e:
-            log.error(f"Error saving account to storage: {e}")
 
     async def disable_credential(self, virtual_filename: str):
         """禁用凭证"""
