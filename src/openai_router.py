@@ -84,17 +84,24 @@ def _extract_error_code_from_exception(error_message: str) -> int:
 
 
 async def _check_should_retry_antigravity(error_code: int, auto_ban_error_codes: list) -> bool:
-    """检查 Antigravity 错误是否应该重试
+    """检查 Antigravity 错误是否应该重试（切换凭证后重试）
 
     Args:
         error_code: HTTP 错误码
-        auto_ban_error_codes: 自动封禁的错误码列表
+        auto_ban_error_codes: 自动封禁的错误码列表（这些错误表示凭证有问题）
 
     Returns:
-        bool: True 表示应该重试，False 表示不重试
+        bool: True 表示应该切换凭证重试，False 表示不重试（直接返回错误）
+    
+    Note:
+        - 429: 配额耗尽，切换凭证重试（当前凭证已被系列封禁）
+        - 403/401: 凭证无效，切换凭证重试（当前凭证已被禁用）
+        - 404: 模型不存在或凭证问题，切换凭证重试
+        - 其他错误（如网络错误）: 不重试，直接返回错误
     """
     if error_code is None:
         return False
+    # 这些错误码表示当前凭证有问题，应该切换到下一个凭证重试
     return error_code in auto_ban_error_codes
 
 

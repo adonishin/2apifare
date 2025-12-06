@@ -628,12 +628,22 @@ class AntigravityCredentialManager:
                 f"Marked Antigravity credential error: {virtual_filename}, error_code={error_code}"
             )
 
-            # 特殊处理 429 错误：临时封禁系列
+            # 特殊处理 429 错误：临时封禁系列（不禁用账号，只是暂时不用该系列）
             if error_code == 429:
                 await self._handle_429_series_ban(virtual_filename, error_message)
                 return
 
-            # 如果需要自动封禁，检查配置（非 429 错误）
+            # ============ 凭证无效错误：始终禁用账号 ============
+            # 这些错误码明确表示凭证有问题，必须禁用以避免重复尝试
+            # 不依赖 auto_ban_enabled 配置，因为这些是致命错误
+            CREDENTIAL_INVALID_ERRORS = [401, 403, 404]
+            
+            if error_code in CREDENTIAL_INVALID_ERRORS:
+                log.warning(f"[CRITICAL] Credential invalid error {error_code}, disabling account: {virtual_filename}")
+                await self.disable_credential(virtual_filename)
+                return
+
+            # ============ 其他错误：根据配置决定是否禁用 ============
             from config import get_auto_ban_enabled, get_auto_ban_error_codes
 
             auto_ban_enabled = await get_auto_ban_enabled()
