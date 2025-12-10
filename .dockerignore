@@ -59,7 +59,7 @@ log.txt
 creds/
 *.json
 !package.json
-*.toml
+
 !pyproject.toml
 .env
 .env.*
